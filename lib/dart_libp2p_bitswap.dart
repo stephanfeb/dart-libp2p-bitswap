@@ -1,8 +1,11 @@
-/// Support for doing something awesome.
+/// A Dart implementation of the Bitswap protocol for libp2p.
 ///
-/// More dartdocs go here.
-library;
+/// This library provides the main `Bitswap` class for interacting with the Bitswap network,
+/// the `IBlockStore` interface that clients need to implement for block storage,
+/// and the underlying protobuf message definitions.
+library dart_libp2p_bitswap;
 
-export 'src/dart_libp2p_bitswap_base.dart';
+export 'src/bitswap.dart'; // Exports Bitswap class and IBlockStore interface
+export 'src/proto/bitswap_message.pb.dart'; // Exports protobuf message types
 
-// TODO: Export any libraries intended for clients of this package.
+// The 'src/dart_libp2p_bitswap_base.dart' was a placeholder and is not exported.
