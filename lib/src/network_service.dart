@@ -144,7 +144,21 @@ class BitswapNetworkService {
       if (stream == null) {
         print('No active stream to $peerId, opening new one.');
         final peerIdObj = libp2p.PeerId.fromString(peerId);
-        stream = await _host.newStream(peerIdObj, [protocolId], libp2p.Context());
+        print('NetworkService: _host runtimeType: ${_host.runtimeType}, hashCode: ${_host.hashCode}');
+        print('NetworkService: Calling _host.newStream for peer $peerId ($peerIdObj)');
+        try {
+          stream = await _host.newStream(peerIdObj, [protocolId], libp2p.Context());
+          print('NetworkService: _host.newStream completed. Stream: ${stream?.id}');
+        } catch (e, s) {
+          print('NetworkService: Error calling _host.newStream: $e\nStack: $s');
+          rethrow;
+        }
+        if (stream == null) {
+          print('NetworkService: _host.newStream returned null for $peerId!');
+          // Potentially throw an error here or handle this case, 
+          // as not having a stream means we can't send the message.
+          return; // Exit if stream is null
+        }
         activeStreams[peerId] = stream; // Renamed
         // TODO: Listen for stream close/error events to remove it from activeStreams
         // For example, stream.onClose(() => activeStreams.remove(peerId));
@@ -166,13 +180,18 @@ class BitswapNetworkService {
     } catch (e) {
       print('Error sending Bitswap message to $peerId: $e');
       // If an error occurs, the stream might be unusable. Remove it.
-      if (stream != null) {
+      if (stream != null) { // Check if stream was successfully assigned before trying to remove/close
         activeStreams.remove(peerId); // Renamed
         try {
           await stream.close(); // Attempt to close it gracefully
         } catch (closeError) {
-          print('Error closing stream after send error: $closeError');
+          print('NetworkService: Error closing stream after send error: $closeError');
         }
+      } else {
+        // If stream was null (e.g. newStream failed and returned null, or threw before assignment)
+        // we might still want to remove the peerId key if it was speculatively added or if there's a different logic path.
+        // For now, just log that the stream was null at this point.
+        print('NetworkService: Stream was null when catching send error for $peerId.');
       }
     }
   }

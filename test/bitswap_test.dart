@@ -217,44 +217,39 @@ void main() {
         ..block = cid1.toBytes()
         ..wantType = pb.Message_Wantlist_WantType.Block;
       final incomingMessage = pb.Message()..wantlist = (pb.Message_Wantlist()..entries.add(wantEntry));
-      final blockData = Uint8List.fromList([1, 2, 3]);
+      final blockData = Uint8List.fromList([1, 2, 3]); // Still needed for mockBlockStore.get
 
       when(mockBlockStore.has(cid1)).thenAnswer((_) async => true);
-      when(mockBlockStore.get(cid1)).thenAnswer((_) async => blockData);
+      when(mockBlockStore.get(cid1)).thenAnswer((_) async => blockData); // Keep this for now as it's awaited
 
       // The internal NetworkService will use mockHost.newStream to send the response
       final mockResponseStream = MockP2PStream();
-      when(mockResponseStream.write(any)).thenAnswer((_) async {});
-      when(mockResponseStream.close()).thenAnswer((_) async {}); // Important if NS closes after send
-      when(mockHost.newStream(testPeerId1, [bitswapProtocolId], any)).thenAnswer((_) async => mockResponseStream);
+      // when(mockResponseStream.write(any)).thenAnswer((_) async {}); // Temporarily comment out
+      // when(mockResponseStream.close()).thenAnswer((_) async {}); // Temporarily comment out
       
-      // Directly call the handler (as it's private) via a test mechanism if possible,
-      // or trigger it by simulating an incoming message via a mocked NetworkService if Bitswap took NS as DI.
-      // Since NS is internal, we simulate the call path.
-      // This means we need a way to pass the message to Bitswap's _handleIncomingMessage.
-      // This is where the design for testability matters.
-      // For now, we assume the internal NetworkService's _onIncomingStream would call Bitswap's _handleIncomingMessage.
-      // We can simulate this by directly calling handleIncomingMessage (now package-private).
+      final expectedProtocols = [bitswapProtocolId]; 
+
+      // Restore specific matchers for the 'when' stub
+      when(mockHost.newStream(
+        argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', testPeerId1Str)),
+        argThat(equals(expectedProtocols)),
+        argThat(isA<libp2p.Context>())
+      )).thenAnswer((_) async => mockResponseStream);
+      
       bitswap.handleIncomingMessage(testPeerId1Str, incomingMessage);
       
-      await untilCalled(mockBlockStore.get(cid1)); // Wait for async operations
+      await untilCalled(mockBlockStore.get(cid1)); 
+      await Future.delayed(Duration.zero); // Add delay to allow event loop to process
 
-      // Verify that NetworkService (via mockHost) sent a message back
-      verify(mockHost.newStream(testPeerId1, [bitswapProtocolId], any)).called(1);
+      // Restore specific matchers for verify
+      verify(mockHost.newStream(
+        argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', testPeerId1Str)),
+        argThat(equals(expectedProtocols)), 
+        argThat(isA<libp2p.Context>()) 
+      )).called(1);
       
-      // Verify the content of what was written to the stream
-      // final prefixMatcher = predicate<Uint8List>((val) { // REMOVED
-      //   // Reconstruct expected prefix for cid1 (assuming CIDv1, dag-pb, sha2-256)
-      //   // This is complex and error-prone to do manually here.
-      //   // A better test would capture the argument and decode it.
-      //   return val.isNotEmpty; // Basic check
-      // }); // REMOVED
-      // final dataMatcher = equals(blockData); // REMOVED
-
-      // Check that write was called twice (prefix, then data)
+      // Restore verification for mockResponseStream.write
       verify(mockResponseStream.write(any)).called(2); 
-      // verify(mockResponseStream.write(argThat(prefixMatcher))).called(1); 
-      // verify(mockResponseStream.write(argThat(dataMatcher))).called(1); 
     });
 
     // TODO: More _handleWantlist scenarios: cancel, HAVE, DONT_HAVE, block not found, wantlist.full
