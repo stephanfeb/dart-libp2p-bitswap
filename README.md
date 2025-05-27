@@ -100,10 +100,28 @@ import 'package:dart_libp2p/dart_libp2p.dart' as libp2p; // Assuming this is you
 // libp2p.Host host = ...; 
 // await host.start();
 
+// You need to obtain the peer connectedness event stream from your host.
+// The exact way to get this stream depends on your libp2p.Host implementation.
+// For example, it might be:
+// Stream<libp2p.EvtPeerConnectednessChanged> peerEvents = host.eventBus.subscribe(libp2p.EvtPeerConnectednessChanged).stream;
+// Or if your host provides it directly:
+// Stream<libp2p.EvtPeerConnectednessChanged> peerEvents = host.getPeerEventsStream(); // Placeholder
+
+// For this example, let's assume you have a StreamController for it:
+final peerConnectednessController = StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
+// In a real app, this controller would be fed by actual peer connection events from the libp2p Host.
+
 final myBlockStore = MyBlockStore();
-final bitswap = Bitswap(host: host, blockStore: myBlockStore);
+final bitswap = Bitswap(
+  host: host, 
+  blockStore: myBlockStore,
+  peerEventsStream: peerConnectednessController.stream, // Provide the stream
+);
 
 print('Bitswap service initialized.');
+
+// Don't forget to close the controller when done if you created it
+// await peerConnectednessController.close(); 
 ```
 
 ### 3. Requesting Blocks (Wanting Blocks)
@@ -114,8 +132,8 @@ To request blocks from the network, use the `wantBlocks` method.
 import 'package:dart_cid/dart_cid.dart' as dart_cid;
 
 // Example CIDs you want to fetch
-final cid1 = dart_cid.CID.parse('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'); // Replace with actual CIDs
-// final cid2 = dart_cid.CID.parse('...');
+final cid1 = dart_cid.CID.fromString('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'); // Replace with actual CIDs, using fromString
+// final cid2 = dart_cid.CID.fromString('...'); // Using fromString
 
 await bitswap.wantBlocks([cid1 /*, cid2 */]);
 print('Requested CIDs: ${cid1.toString()}');
@@ -149,10 +167,10 @@ A more detailed, runnable example can be found in the `/example` directory of th
 // Bitswap bitswap = Bitswap(host: host, blockStore: blockStore);
 
 // final exampleData = Uint8List.fromList('Hello Bitswap!'.codeUnits);
-// final exampleCid = await computeCid(exampleData); // You'd need a CID computation helper
+// final exampleCid = dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', exampleData); // Example of creating CID from data
 // await myBlockStore.put(exampleCid, exampleData);
 
-// final cidToWant = dart_cid.CID.parse('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq');
+// final cidToWant = dart_cid.CID.fromString('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'); // Using fromString
 // await bitswap.wantBlocks([cidToWant]);
 
 // ... (await bitswap.stop()) ...
