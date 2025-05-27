@@ -15,13 +15,10 @@ void main() {
 
     setUp(() {
       wantManager = WantManager();
-      // Create some CIDs for testing. These are arbitrary but valid.
-      // Using CIDv1, dag-pb, sha2-256 for consistency.
-      // Actual hash values are not critical for these tests, just distinct CIDs.
-      // Assuming CID.fromString is the correct factory method instead of CID.parse
-      cid1 = dart_cid.CID.fromString('bafyreigz6f7vjo2s7q2a3m2k5j5z6f7vjo2s7q2a3m2k5j5z6f7vjo2s');
-      cid2 = dart_cid.CID.fromString('bafyreic7kcv7kgv7kcv7kgv7kcv7kgv7kcv7kgv7kcv7kgv7kcv7kgv7');
-      cid3 = dart_cid.CID.fromString('bafyreibme2qys7ajy2qys7ajy2qys7ajy2qys7ajy2qys7ajy2qys7aj');
+      // Use known valid CIDs
+      cid1 = dart_cid.CID.fromString('bafkreihm362yepzlhjmcs3h2nryx2i6nfljmmqg43dsczfvtcndvklkuxy'); // "hello world"
+      cid2 = dart_cid.CID.fromString('bafkreicysg23kiwv34eg2d7qweipxw2w72v2edxywccodvrscfwb7na2i4'); // "Hello IPFS!"
+      cid3 = dart_cid.CID.fromString('bafkreibjo42q44jfv4zaz7z6n27m4goj4yose2nogxqk3b2x4laj5cuchi'); // "bitswap test"
     });
 
     group('Local Wantlist Management', () {
