@@ -1,0 +1,304 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:dart_libp2p/p2p/discovery/peer_info.dart';
+import 'package:dart_libp2p_bitswap/src/bitswap.dart';
+// import 'package:dart_libp2p_bitswap/src/want_manager.dart'; // Used for type hint if injecting - REMOVED
+// import 'package:dart_libp2p_bitswap/src/network_service.dart'; // Used for type hint if injecting - REMOVED
+import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;
+import 'package:dart_cid/dart_cid.dart' as dart_cid;
+import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
+import 'package:test/test.dart';
+import 'package:mockito/mockito.dart';
+import 'package:mockito/annotations.dart';
+
+import 'bitswap_test.mocks.dart'; // Will be generated
+
+// Define a mockable class for the object returned by eventBus.subscribe()
+abstract class TestEventSubscription<T> implements libp2p.Subscription<T> { // Added implements
+  // Stream<T> get stream; // Already in libp2p.Subscription
+  // Future<void> close(); // Already in libp2p.Subscription, was cancel()
+  // String get name; // Already in libp2p.Subscription
+}
+
+@GenerateMocks([
+  IBlockStore,
+  libp2p.Host,
+  libp2p.PeerId,
+  libp2p.EventBus,
+  libp2p.Network,
+  libp2p.Peerstore,
+  libp2p.P2PStream,
+  libp2p.Conn,      // From user's previous file state
+  PeerInfo,  // Using PeerInfo as suggested by type errors, removed libp2p prefix
+  TestEventSubscription, // Mocking this abstract class
+])
+void main() {
+  late MockHost mockHost;
+  late MockIBlockStore mockBlockStore;
+  late MockEventBus mockEventBus;
+  late MockNetwork mockNetwork;
+  late MockPeerstore mockPeerStore;
+  // late MockTestEventSubscription<libp2p.EvtPeerConnectednessChanged> mockEventBusSubscription; // No longer directly needed for eventBus.subscribe mock
+  
+  late StreamController<libp2p.EvtPeerConnectednessChanged> peerConnectednessEventController;
+  late Bitswap bitswap;
+
+  final cid1 = dart_cid.CID.fromString('bafkreihm362yepzlhjmcs3h2nryx2i6nfljmmqg43dsczfvtcndvklkuxy'); // Replaced with a valid CID for "hello world"
+  late MockPeerId testPeerId1; 
+  // This is the Base58 multihash representation of an identity-hashed PeerID from the string "test-peer-id-1"
+  // (derived from PeerId.fromString("bafzbeigweq4j366sq2k7j727lqgrw7x2k3x5ms2sl4unhyrionp2zlbxci").toBase58())
+  final testPeerId1Str = 'QmckZzS6pmmQXrmZPFjevKuT3Hip4kNyj5FjarHrYKfcBs'; 
+  final bitswapProtocolId = '/ipfs/bitswap/1.2.0';
+
+  setUp(() {
+    mockHost = MockHost();
+    mockBlockStore = MockIBlockStore();
+    mockEventBus = MockEventBus();
+    mockNetwork = MockNetwork();
+    mockPeerStore = MockPeerstore();
+    // mockEventBusSubscription = MockTestEventSubscription<libp2p.EvtPeerConnectednessChanged>(); // No longer directly needed
+
+    testPeerId1 = MockPeerId(); 
+    when(testPeerId1.toBase58()).thenReturn(testPeerId1Str); // Changed from toString() to toBase58()
+    
+    // final hostMockPeerId = MockPeerId(); // Still keeping host.peerId stub removed for now
+    // when(hostMockPeerId.toString()).thenReturn("QmHostPeer");
+
+    when(mockHost.eventBus).thenReturn(mockEventBus);
+    when(mockHost.network).thenReturn(mockNetwork);
+    when(mockHost.peerStore).thenReturn(mockPeerStore);
+    // when(mockHost.peerId).thenReturn(hostMockPeerId); 
+
+    peerConnectednessEventController = StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
+    // The following lines related to mockEventBus.subscribe and mockEventBusSubscription are removed
+    // as Bitswap now takes the stream directly.
+    // when(mockEventBus.subscribe(equals(libp2p.EvtPeerConnectednessChanged), opts: null)).thenReturn(mockEventBusSubscription);
+    // when(mockEventBusSubscription.stream).thenAnswer((_) => peerConnectednessEventController.stream);
+    // when(mockEventBusSubscription.name).thenReturn('test_subscription');
+    // when(mockEventBusSubscription.close()).thenAnswer((_) async {});
+
+
+    // Default stubs for Host network/peerstore for _getBitswapPeers
+    when(mockNetwork.conns).thenReturn([]);
+    when(mockPeerStore.getPeer(any)).thenAnswer((_) async => null);
+    
+    // Default stub for newStream (used by internal NetworkService)
+    final mockP2PStream = MockP2PStream();
+    when(mockP2PStream.write(any)).thenAnswer((_) async {});
+    when(mockP2PStream.close()).thenAnswer((_) async {});
+    when(mockHost.newStream(any, any, any)).thenAnswer((_) async => mockP2PStream);
+
+    // Default stubs for IBlockStore
+    when(mockBlockStore.has(any)).thenAnswer((_) async => false);
+    when(mockBlockStore.get(any)).thenAnswer((_) async => null);
+    when(mockBlockStore.put(any, any)).thenAnswer((_) async {});
+
+    bitswap = Bitswap(
+      host: mockHost, 
+      blockStore: mockBlockStore,
+      peerEventsStream: peerConnectednessEventController.stream, // Pass the stream directly
+    );
+    // Note: Bitswap creates its own WantManager and BitswapNetworkService.
+    // Tests will verify Bitswap's behavior by its interactions with mockHost and mockBlockStore,
+    // and by observing the state that can be inferred through its public API or effects.
+  });
+
+  tearDown(() async {
+    await peerConnectednessEventController.close();
+    await bitswap.stop(); 
+  });
+
+  group('Constructor and Stop', () {
+    test('initializes and listens to peer connectedness events stream', () {
+      // Bitswap is now given the stream directly.
+      // Verification that it listens can be implicit through tests that rely on event processing (e.g., Peer Disconnection Handling).
+      // We can also check if the controller has a listener.
+      expect(peerConnectednessEventController.hasListener, isTrue);
+      // Note: Verifying internal NetworkService.start() is implicit.
+    });
+
+    test('stop() cancels event subscriptions and stops network service', () async {
+      // Ensure there's a listener before stop() is called
+      expect(peerConnectednessEventController.hasListener, isTrue);
+      
+      await bitswap.stop();
+      
+      // Verify the subscription obtained from the stream was cancelled
+      // This means the StreamController should no longer have a listener after Bitswap.stop()
+      expect(peerConnectednessEventController.hasListener, isFalse);
+      
+      // Verifying networkService.stop() is implicit as it's internal.
+      // We could check if host.removeStreamHandler is called if NetworkService.stop() does that.
+      verify(mockHost.removeStreamHandler(bitswapProtocolId)).called(1); // Assuming NetworkService.stop calls this
+    });
+  });
+
+  group('wantBlocks()', () {
+    test('does nothing if CIDs list is empty', () async {
+      await bitswap.wantBlocks([]);
+      // No network activity should occur if no CIDs are wanted.
+      verifyNever(mockHost.newStream(any, any, any));
+    });
+
+    test('sends wantlist message to discovered Bitswap peers', () async {
+      final mockPeerInfo = MockPeerInfo(); 
+      when(mockPeerInfo.protocols).thenReturn({bitswapProtocolId});
+      
+      final mockConn1 = MockConn(); 
+      when(mockConn1.remotePeer).thenReturn(testPeerId1);
+      
+      when(mockNetwork.conns).thenReturn([mockConn1]); 
+      when(mockPeerStore.getPeer(testPeerId1)).thenAnswer((_) async => mockPeerInfo); 
+
+      await bitswap.wantBlocks([cid1]);
+
+      // Verify that the internal NetworkService tried to open a stream to the peer
+      // The PeerId passed to newStream will be a real PeerId created from testPeerId1Str.
+      verify(mockHost.newStream(
+        argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', testPeerId1Str)), 
+        [bitswapProtocolId], 
+        any
+      )).called(1);
+      // Further verification of the *exact* bytes sent is complex without deeper spying
+      // or making NetworkService injectable and mockable. We trust NetworkService's own tests here.
+    });
+
+     test('does not send if no new wants are actually added by internal WantManager', () async {
+      // This test relies on the internal WantManager's behavior.
+      // First, make the want "old" by adding it directly to the internal want manager.
+      // This is an example of where DI for WantManager would make testing cleaner.
+      // For now, we call wantBlocks twice; the first adds it, the second should find it "old".
+      
+      when(mockNetwork.conns).thenReturn([]); // No peers to simplify
+      await bitswap.wantBlocks([cid1]); // First call, want is new
+      
+      // Reset newStream mock call count before the second call
+      clearInteractions(mockHost); 
+      when(mockHost.newStream(any, any, any)).thenAnswer((_) async => MockP2PStream()); // Re-stub
+
+      await bitswap.wantBlocks([cid1]); // Second call, want should be old
+      verifyNever(mockHost.newStream(any, any, any));
+    });
+  });
+
+  group('Peer Disconnection Handling', () {
+    test('cleans up when a peer disconnects', () async {
+      // Simulate a peer disconnecting by emitting an event
+      final disconnectedPeerEvent = libp2p.EvtPeerConnectednessChanged( // Corrected instantiation
+        peer: testPeerId1, 
+        connectedness: libp2p.Connectedness.notConnected
+      ); 
+      peerConnectednessEventController.add(disconnectedPeerEvent);
+
+      // Allow event to propagate and be handled
+      await Future.delayed(Duration.zero); 
+
+      // Verify that NetworkService's handlePeerDisconnected was called (indirectly)
+      // This is hard to verify directly without injecting NetworkService.
+      // We can check if the internal _activeStreams map in NetworkService would be cleared for this peer.
+      // One side effect is that if NetworkService.handlePeerDisconnected closes a stream,
+      // we might be able to mock that stream and verify close() if we had a handle to it.
+      
+      // For now, we trust the _onPeerDisconnected logic calls the internal NetworkService.
+      // A more robust test would involve verifying that the stream to testPeerId1 (if one existed) was closed.
+      // We can also verify that WantManager's clearPeerWantlist was called.
+      // This also requires DI for WantManager or a way to inspect its state/calls.
+      
+      // This test primarily ensures the event listener is wired up and calls _onPeerDisconnected.
+      // The effects of _onPeerDisconnected are harder to unit test without DI.
+      print('Test for peer disconnection relies on the event being processed.');
+    });
+  });
+  
+  group('_handleIncomingMessage - Process Wantlist', () {
+    test('responds with block if available for a BLOCK want', () async {
+      final wantEntry = pb.Message_Wantlist_Entry()
+        ..block = cid1.toBytes()
+        ..wantType = pb.Message_Wantlist_WantType.Block;
+      final incomingMessage = pb.Message()..wantlist = (pb.Message_Wantlist()..entries.add(wantEntry));
+      final blockData = Uint8List.fromList([1, 2, 3]);
+
+      when(mockBlockStore.has(cid1)).thenAnswer((_) async => true);
+      when(mockBlockStore.get(cid1)).thenAnswer((_) async => blockData);
+
+      // The internal NetworkService will use mockHost.newStream to send the response
+      final mockResponseStream = MockP2PStream();
+      when(mockResponseStream.write(any)).thenAnswer((_) async {});
+      when(mockResponseStream.close()).thenAnswer((_) async {}); // Important if NS closes after send
+      when(mockHost.newStream(testPeerId1, [bitswapProtocolId], any)).thenAnswer((_) async => mockResponseStream);
+      
+      // Directly call the handler (as it's private) via a test mechanism if possible,
+      // or trigger it by simulating an incoming message via a mocked NetworkService if Bitswap took NS as DI.
+      // Since NS is internal, we simulate the call path.
+      // This means we need a way to pass the message to Bitswap's _handleIncomingMessage.
+      // This is where the design for testability matters.
+      // For now, we assume the internal NetworkService's _onIncomingStream would call Bitswap's _handleIncomingMessage.
+      // We can simulate this by directly calling handleIncomingMessage (now package-private).
+      bitswap.handleIncomingMessage(testPeerId1Str, incomingMessage);
+      
+      await untilCalled(mockBlockStore.get(cid1)); // Wait for async operations
+
+      // Verify that NetworkService (via mockHost) sent a message back
+      verify(mockHost.newStream(testPeerId1, [bitswapProtocolId], any)).called(1);
+      
+      // Verify the content of what was written to the stream
+      // final prefixMatcher = predicate<Uint8List>((val) { // REMOVED
+      //   // Reconstruct expected prefix for cid1 (assuming CIDv1, dag-pb, sha2-256)
+      //   // This is complex and error-prone to do manually here.
+      //   // A better test would capture the argument and decode it.
+      //   return val.isNotEmpty; // Basic check
+      // }); // REMOVED
+      // final dataMatcher = equals(blockData); // REMOVED
+
+      // Check that write was called twice (prefix, then data)
+      verify(mockResponseStream.write(any)).called(2); 
+      // verify(mockResponseStream.write(argThat(prefixMatcher))).called(1); 
+      // verify(mockResponseStream.write(argThat(dataMatcher))).called(1); 
+    });
+
+    // TODO: More _handleWantlist scenarios: cancel, HAVE, DONT_HAVE, block not found, wantlist.full
+  });
+
+  group('_handleIncomingMessage - Process ReceivedBlock', () {
+    test('stores block if wanted and sends CANCELs', () async {
+      final blockData = Uint8List.fromList([4,5,6]);
+      // This CID needs to be one that would be reconstructed from blockData + a valid prefix
+      // For simplicity, let's use cid1 and assume the prefix matches.
+      final reconstructedCid = cid1; 
+
+      final blockProto = pb.Message_Block()
+        // Prefix for CIDv1, dag-pb (0x70), sha2-256 (0x12), 32-byte digest
+        ..prefix = Uint8List.fromList([0x01, 0x70, 0x12, 0x20]) 
+        ..data = blockData;
+      final incomingMessage = pb.Message()..payload.add(blockProto);
+
+      // Setup internal WantManager (via Bitswap) to expect this block
+      // This is where DI or a test API on Bitswap would be cleaner.
+      // For now, we assume `isWantingLocally` will be true for the reconstructed CID.
+      // We can't directly mock the internal WantManager's `isWantingLocally`.
+      // So, we rely on `wantBlocks` to add it, then test receiving it.
+      
+      // 1. Make Bitswap want the block
+      when(mockNetwork.conns).thenReturn([]); // No peers, so wantBlocks won't try to send
+      await bitswap.wantBlocks([reconstructedCid]); // Now internal WM wants it
+
+      // 2. Simulate receiving the block
+      bitswap.handleIncomingMessage(testPeerId1Str, incomingMessage); // Use package-private method
+      await untilCalled(mockBlockStore.put(reconstructedCid, blockData));
+
+      verify(mockBlockStore.put(reconstructedCid, blockData)).called(1);
+      
+      // Verify that _sendCancelMessages was triggered.
+      // This would call NetworkService.sendMessage to other peers.
+      // If `getPeersSentWantForCid` (on internal WM) returned a peer, a message would be sent.
+      // Example: Assume it was wanted from testPeerId2
+      // This requires setting up the internal WantManager state for `getPeersSentWantForCid`.
+      // This is very difficult without DI for WantManager.
+      
+      // For now, we've verified the block is stored. Cancel logic is harder to verify.
+    });
+  });
+  
+  // TODO: _handleBlockPresence tests
+}

@@ -1,5 +1,5 @@
 import 'package:dart_libp2p_bitswap/dart_libp2p_bitswap.dart';
-import 'package:dart_libp2p/dart_libp2p.dart' as libp2p; // For Host, PeerId etc.
+// import 'package:dart_libp2p/dart_libp2p.dart' as libp2p; // For Host, PeerId etc. - REMOVED
 import 'package:dart_cid/dart_cid.dart' as dart_cid; // For CID
 import 'dart:typed_data';
 

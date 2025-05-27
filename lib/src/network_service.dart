@@ -18,14 +18,14 @@ class BitswapNetworkService {
   final String protocolId = '/ipfs/bitswap/1.2.0'; // Bitswap 1.2.0 protocol ID
 
   // Manage active outgoing streams to peers
-  final Map<String, libp2p.P2PStream> _activeStreams = {};
+  final Map<String, libp2p.P2PStream> activeStreams = {}; // Renamed
 
   BitswapNetworkService(this._host, this._messageHandler) {
     print('BitswapNetworkService instance created.');
   }
 
   Future<void> start() async {
-    _host.setStreamHandler(protocolId, _onIncomingStream);
+    _host.setStreamHandler(protocolId, onIncomingStream); // Renamed
     print('Bitswap protocol handler registered for $protocolId');
     // TODO: Potentially discover existing peers and establish connections
     // or wait for them to connect to us.
@@ -35,19 +35,19 @@ class BitswapNetworkService {
     _host.removeStreamHandler(protocolId);
     print('Bitswap protocol handler unregistered for $protocolId');
     // Close any active outgoing streams
-    for (final stream in _activeStreams.values) {
+    for (final stream in activeStreams.values) { // Renamed
       try {
         await stream.close();
       } catch (e) {
         print('Error closing stream during stop: $e');
       }
     }
-    _activeStreams.clear();
+    activeStreams.clear(); // Renamed
   }
 
   // Called by Bitswap when a peer disconnects to clean up the stream
   Future<void> handlePeerDisconnected(String peerId) async {
-    final stream = _activeStreams.remove(peerId);
+    final stream = activeStreams.remove(peerId); // Renamed
     if (stream != null) {
       print('Peer $peerId disconnected, closing and removing active stream ${stream.id}.');
       try {
@@ -60,7 +60,7 @@ class BitswapNetworkService {
 
   // Handles a new incoming libp2p stream for the Bitswap protocol
   // This method's signature might still need adjustment based on your Host.setStreamHandler
-  Future<void> _onIncomingStream(libp2p.P2PStream stream, libp2p.PeerId peerIdObj) async {
+  Future<void> onIncomingStream(libp2p.P2PStream stream, libp2p.PeerId peerIdObj) async { // Renamed
     final peerId = peerIdObj.toString();
     print('Received incoming Bitswap stream from $peerId');
 
@@ -138,16 +138,16 @@ class BitswapNetworkService {
 
   Future<void> sendMessage(String peerId, pb.Message message) async {
     print('Attempting to send Bitswap message to $peerId.');
-    libp2p.P2PStream? stream = _activeStreams[peerId];
+    libp2p.P2PStream? stream = activeStreams[peerId]; // Renamed
 
     try {
       if (stream == null) {
         print('No active stream to $peerId, opening new one.');
         final peerIdObj = libp2p.PeerId.fromString(peerId);
         stream = await _host.newStream(peerIdObj, [protocolId], libp2p.Context());
-        _activeStreams[peerId] = stream;
-        // TODO: Listen for stream close/error events to remove it from _activeStreams
-        // For example, stream.onClose(() => _activeStreams.remove(peerId));
+        activeStreams[peerId] = stream; // Renamed
+        // TODO: Listen for stream close/error events to remove it from activeStreams
+        // For example, stream.onClose(() => activeStreams.remove(peerId));
         // or handle errors in the write operation below to remove the stream.
       } else {
         print('Reusing existing stream to $peerId.');
@@ -167,7 +167,7 @@ class BitswapNetworkService {
       print('Error sending Bitswap message to $peerId: $e');
       // If an error occurs, the stream might be unusable. Remove it.
       if (stream != null) {
-        _activeStreams.remove(peerId);
+        activeStreams.remove(peerId); // Renamed
         try {
           await stream.close(); // Attempt to close it gracefully
         } catch (closeError) {

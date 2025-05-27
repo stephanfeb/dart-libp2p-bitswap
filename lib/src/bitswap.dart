@@ -28,45 +28,46 @@ class Bitswap {
   late final WantManager _wantManager;
   late final BitswapNetworkService _networkService;
   // Using dynamic for the subscription type as the event type from bus might be generic
-  StreamSubscription<dynamic>? _connectednessChangeSubscription; 
+  StreamSubscription<dynamic>? _connectednessChangeSubscription;
 
   Bitswap({
     required libp2p.Host host,
     required IBlockStore blockStore,
+    required Stream<libp2p.EvtPeerConnectednessChanged> peerEventsStream, // Added stream parameter
   })  : _host = host,
         _blockStore = blockStore {
     _wantManager = WantManager();
-    _networkService = BitswapNetworkService(_host, _handleIncomingMessage);
+    _networkService = BitswapNetworkService(_host, handleIncomingMessage); // Updated method name
     _networkService.start(); // Start listening for network messages
 
-    // User-provided code for subscribing to connectedness changes
+    // Listen to the provided stream for peer connectedness changes
     try {
-      final eventSubscription = _host.eventBus.subscribe(libp2p.EvtPeerConnectednessChanged);
-      _connectednessChangeSubscription = eventSubscription.stream.listen((event) {
-        if (event is libp2p.EvtPeerConnectednessChanged) {
-          if (event.connectedness == libp2p.Connectedness.notConnected) {
-            _onPeerDisconnected(event.peer); // Call our handler
-          } else if (event.connectedness == libp2p.Connectedness.connected) {
-            // Handle peer connected if needed in the future
-            print('Bitswap: Peer connected: ${event.peer.toString()}');
-          }
+      _connectednessChangeSubscription = peerEventsStream.listen((event) {
+        // The stream is already typed, so direct access should be fine.
+        // No need for 'if (event is libp2p.EvtPeerConnectednessChanged)' if stream is correctly typed.
+        if (event.connectedness == libp2p.Connectedness.notConnected) {
+          onPeerDisconnected(event.peer); // Updated method name
+        } else if (event.connectedness == libp2p.Connectedness.connected) {
+          // Handle peer connected if needed in the future
+          print('Bitswap: Peer connected: ${event.peer.toString()}');
         }
       });
-      print('Bitswap: Subscribed to peer connectedness changes.');
+      print('Bitswap: Listening to provided peer connectedness event stream.');
     } catch (e) {
-      print('Bitswap: Error subscribing to peer connectedness changes: $e. Disconnection cleanup might not work.');
+      print('Bitswap: Error listening to peer connectedness event stream: $e. Disconnection cleanup might not work.');
     }
     print('Bitswap instance created and network service started.');
   }
 
   Future<void> stop() async {
     print('Bitswap stopping...');
-    await _connectednessChangeSubscription?.cancel(); // Cancel the correct subscription
+    await _connectednessChangeSubscription?.cancel(); // Reverted to cancel()
     await _networkService.stop();
     print('Bitswap stopped.');
   }
   
-  void _onPeerDisconnected(libp2p.PeerId peerId) {
+  // Made package-private for testability. Ideally, use DI or other patterns.
+  void onPeerDisconnected(libp2p.PeerId peerId) {
     final peerIdStr = peerId.toString();
     print('Bitswap: Peer disconnected: $peerIdStr. Cleaning up...');
     _activeBitswapPeers.remove(peerIdStr);
@@ -77,7 +78,8 @@ class Bitswap {
   }
 
   // This method will be passed to BitswapNetworkService
-  void _handleIncomingMessage(String peerId, pb.Message message) {
+  // Made package-private for testability. Ideally, use DI or other patterns.
+  void handleIncomingMessage(String peerId, pb.Message message) {
     // Process wantlist entries
     if (message.hasWantlist()) {
       _handleWantlist(peerId, message.wantlist);
@@ -314,7 +316,7 @@ class Bitswap {
 
       print('Successfully reconstructed CID: $receivedCid from $peerId.');
 
-      if (_wantManager.isWantingLocally(receivedCid!)) { 
+      if (_wantManager.isWantingLocally(receivedCid)) { 
         await _blockStore.put(receivedCid, dataBytes);
         _wantManager.blockReceived(receivedCid, dataBytes); 
         print('Stored block $receivedCid from $peerId');
@@ -415,7 +417,7 @@ class Bitswap {
         final peerInfo = await _host.peerStore.getPeer(remotePeerId); // Added await
         
         if (peerInfo != null && peerInfo.protocols.contains(_networkService.protocolId)) {
-          peers.add(remotePeerId.toString());
+          peers.add(remotePeerId.toBase58()); // Use toBase58() instead of toString()
         }
       }
     } catch (e) {
