@@ -11,6 +11,7 @@ import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
 import 'package:test/test.dart';
 import 'package:mockito/mockito.dart';
 import 'package:mockito/annotations.dart';
+import 'package:crypto/crypto.dart' as crypto;
 
 import 'bitswap_test.mocks.dart'; // Will be generated
 
@@ -257,41 +258,43 @@ void main() {
 
   group('_handleIncomingMessage - Process ReceivedBlock', () {
     test('stores block if wanted and sends CANCELs', () async {
-      final blockData = Uint8List.fromList([4,5,6]);
-      // This CID needs to be one that would be reconstructed from blockData + a valid prefix
-      // For simplicity, let's use cid1 and assume the prefix matches.
-      final reconstructedCid = cid1; 
+      final blockData = Uint8List.fromList([4, 5, 6]); // This is the actual content of the block
+
+      // Create the CID that will be put on the wantlist using CID.fromData.
+      // CID.fromData will hash blockData using sha2-256 (default) and use 'dag-pb' codec for CIDv1.
+      // This ensures cidToWant matches how Bitswap reconstructs the CID from the message.
+      final cidToWant = dart_cid.CID.fromData(dart_cid.CID.V1, 'dag-pb', blockData);
+      // print('Test: CID to want: ${cidToWant.toString()}'); // For debugging
+
+      // The prefix for the proto message should describe how to derive the CID from blockData:
+      // version (0x01), codec (0x70), mh_type (0x12 for sha2-256), mh_len (0x20 for 32 bytes)
+      final protoBlockPrefix = Uint8List.fromList([0x01, 0x70, 0x12, 0x20]);
 
       final blockProto = pb.Message_Block()
-        // Prefix for CIDv1, dag-pb (0x70), sha2-256 (0x12), 32-byte digest
-        ..prefix = Uint8List.fromList([0x01, 0x70, 0x12, 0x20]) 
+        ..prefix = protoBlockPrefix 
         ..data = blockData;
       final incomingMessage = pb.Message()..payload.add(blockProto);
-
-      // Setup internal WantManager (via Bitswap) to expect this block
-      // This is where DI or a test API on Bitswap would be cleaner.
-      // For now, we assume `isWantingLocally` will be true for the reconstructed CID.
-      // We can't directly mock the internal WantManager's `isWantingLocally`.
-      // So, we rely on `wantBlocks` to add it, then test receiving it.
       
       // 1. Make Bitswap want the block
-      when(mockNetwork.conns).thenReturn([]); // No peers, so wantBlocks won't try to send
-      await bitswap.wantBlocks([reconstructedCid]); // Now internal WM wants it
+      when(mockNetwork.conns).thenReturn([]); // No peers, so wantBlocks won't try to send initially
+      await bitswap.wantBlocks([cidToWant]); // Now internal WM wants it
 
       // 2. Simulate receiving the block
-      bitswap.handleIncomingMessage(testPeerId1Str, incomingMessage); // Use package-private method
-      await untilCalled(mockBlockStore.put(reconstructedCid, blockData));
-
-      verify(mockBlockStore.put(reconstructedCid, blockData)).called(1);
+      // This will trigger _handleReceivedBlock -> _wantManager.receiveBlock -> _blockStore.put -> _sendCancelMessages
+      bitswap.handleIncomingMessage(testPeerId1Str, incomingMessage); 
       
-      // Verify that _sendCancelMessages was triggered.
-      // This would call NetworkService.sendMessage to other peers.
-      // If `getPeersSentWantForCid` (on internal WM) returned a peer, a message would be sent.
-      // Example: Assume it was wanted from testPeerId2
-      // This requires setting up the internal WantManager state for `getPeersSentWantForCid`.
-      // This is very difficult without DI for WantManager.
+      // Verify the block was stored because it was wanted
+      await untilCalled(mockBlockStore.put(cidToWant, blockData));
+      verify(mockBlockStore.put(cidToWant, blockData)).called(1);
       
-      // For now, we've verified the block is stored. Cancel logic is harder to verify.
+      // Regarding "sends CANCELs":
+      // With the current setup (no peers were sent the want initially because mockNetwork.conns was empty),
+      // _sendCancelMessages will likely find no peers to send CANCELs to.
+      // Thus, no mockHost.newStream calls for CANCEL messages would occur.
+      // If the test's intent is *only* to verify storage when wanted, this should be fine.
+      // If it *must* verify CANCELs are sent, the test setup needs to be more complex
+      // to simulate the want being sent to another peer first.
+      // Given the existing comment "Cancel logic is harder to verify", fixing the storage part is the priority.
     });
   });
   
