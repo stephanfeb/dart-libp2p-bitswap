@@ -61,7 +61,7 @@ class BitswapNetworkService {
   // Handles a new incoming libp2p stream for the Bitswap protocol
   // This method's signature might still need adjustment based on your Host.setStreamHandler
   Future<void> onIncomingStream(libp2p.P2PStream stream, libp2p.PeerId peerIdObj) async { // Renamed
-    final peerId = peerIdObj.toString();
+    final peerId = peerIdObj.toBase58(); // Changed from toString() to toBase58()
     print('Received incoming Bitswap stream from $peerId');
 
     try {

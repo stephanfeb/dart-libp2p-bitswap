@@ -46,82 +46,110 @@ void main() {
   });
 
   group('BitswapNetworkService Tests', () {
-    final testPeerIdStr = 'QmTestPeer123';
-    late MockPeerId mockPeerId;
+    // Use a full, parsable identity CID string for PeerId.fromString()
+    final parsablePeerIdFullStr = 'bafzbeigweq4j366sq2k7j727lqgrw7x2k3x5ms2sl4unhyrionp2zlbxci'; // "test-peer-id-1"
+    // The corresponding Base58 representation
+    final expectedBase58PeerId = 'QmckZzS6pmmQXrmZPFjevKuT3Hip4kNyj5FjarHrYKfcBs';
+
+    final parsablePeerIdForStopTestFullStr = "bafzbeibcolx5jffocx4p4qaccrk2hvzuhqpd76byk7pbuo2pmyptifh2q4"; // "another-test-peer"
+    // This is the actual Base58 for "bafzbeibcolx5jffocx4p4qaccrk2hvzuhqpd76byk7pbuo2pmyptifh2q4"
+    final expectedBase58PeerIdForStopTest = "QmQf8Dq1H9FWfiCBBA1VvZ8xDLNYFDAd1LadvRbSwvn5Rp"; 
+
+
+    late MockPeerId mockPeerId; // This mock is primarily for _onIncomingStream testing
     late MockP2PStream mockStream;
 
     setUp(() {
       mockPeerId = MockPeerId();
-      when(mockPeerId.toString()).thenReturn(testPeerIdStr);
-      // It's important that PeerId.fromString(testPeerIdStr) would return something compatible
-      // For tests involving newStream, we'll ensure the mockHost returns our mockStream.
+      // This mockPeerId is passed to handleIncomingStreamForTest.
+      // Its toBase58() method will be called by the service.
+      when(mockPeerId.toBase58()).thenReturn(expectedBase58PeerId);
 
       mockStream = MockP2PStream();
-      when(mockStream.id()).thenReturn('testStreamId'); // Changed to method call
-      when(mockStream.protocol()).thenReturn(networkService.protocolId); // Changed to method call
-      when(mockStream.write(any)).thenAnswer((_) async => {}); // Default success for writes
-      when(mockStream.close()).thenAnswer((_) async => {});    // Default success for close
+      when(mockStream.id()).thenReturn('testStreamId');
+      when(mockStream.protocol()).thenReturn(networkService.protocolId);
+      when(mockStream.write(any)).thenAnswer((_) async => {});
+      when(mockStream.close()).thenAnswer((_) async => {});
     });
 
     test('start() registers stream handler', () async {
       await networkService.start();
-      verify(mockHost.setStreamHandler(networkService.protocolId, any)).called(1);
+      verify(mockHost.setStreamHandler(networkService.protocolId, captureAny)).called(1);
     });
 
     test('stop() removes stream handler and closes active streams', () async {
-      // Simulate an active stream
-      final peerIdForStream = 'QmAnotherPeer';
-      final mockPeerIdForStream = MockPeerId();
-      when(mockPeerIdForStream.toString()).thenReturn(peerIdForStream);
+      // final mockPeerIdForStopTest = MockPeerId(); // Not strictly needed if we don't interact with its methods
+      // when(mockPeerIdForStopTest.toBase58()).thenReturn(expectedBase58PeerIdForStopTest);
+
+      when(mockHost.newStream(
+        argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerIdForStopTest)), 
+        any, 
+        any
+      )).thenAnswer((_) async => mockStream);
       
-      // Manually add a stream to simulate it being active (since newStream is complex to fully mock here for this specific test)
-      // This requires _activeStreams to be non-final or a way to inject it, or test via sendMessage then stop.
-      // For simplicity, let's test via sendMessage then stop.
-      
-      when(mockHost.newStream(any, any, any)).thenAnswer((_) async => mockStream);
-      
-      final message = pb.Message(); // Empty message
-      await networkService.sendMessage(peerIdForStream, message); // This will add mockStream to _activeStreams
+      final message = pb.Message();
+      // Use the parsable full CID string here
+      await networkService.sendMessage(parsablePeerIdForStopTestFullStr, message);
 
       await networkService.stop();
       
       verify(mockHost.removeStreamHandler(networkService.protocolId)).called(1);
-      verify(mockStream.close()).called(1); // Verify the active stream was closed
-      expect(networkService.getActiveStreamsCount(), 0); // Helper method needed or check internal state
+      verify(mockStream.close()).called(1);
+      expect(networkService.getActiveStreamsCount(), 0);
     });
 
     group('sendMessage()', () {
       final testMessage = pb.Message()..pendingBytes = 123;
 
       test('opens a new stream if none exists and sends data', () async {
-        when(mockHost.newStream(any, [networkService.protocolId], any)).thenAnswer((_) async => mockStream);
+        // Expect newStream to be called with a PeerId whose toBase58() matches expectedBase58PeerId
+        when(mockHost.newStream(
+          argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerId)), 
+          [networkService.protocolId], 
+          any
+        )).thenAnswer((_) async => mockStream);
         
-        await networkService.sendMessage(testPeerIdStr, testMessage);
+        await networkService.sendMessage(parsablePeerIdFullStr, testMessage);
 
-        verify(mockHost.newStream(any, [networkService.protocolId], any)).called(1);
+        verify(mockHost.newStream(
+          argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerId)),
+          [networkService.protocolId],
+          any
+        )).called(1);
         
         final messageBytes = testMessage.writeToBuffer();
         final lengthPrefix = dart_cid.encodeVarint(messageBytes.length);
         
         verify(mockStream.write(lengthPrefix)).called(1);
         verify(mockStream.write(messageBytes)).called(1);
-        // verify(mockStream.close()).called(1); // Stream is NOT closed for reuse
         expect(networkService.getActiveStreamsCount(), 1);
       });
 
       test('reuses an existing stream', () async {
-        when(mockHost.newStream(any, any, any)).thenAnswer((_) async => mockStream);
+        when(mockHost.newStream(
+          argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerId)), 
+          any, 
+          any
+        )).thenAnswer((_) async => mockStream);
         
-        // First send opens the stream
-        await networkService.sendMessage(testPeerIdStr, testMessage);
+        await networkService.sendMessage(parsablePeerIdFullStr, testMessage);
         expect(networkService.getActiveStreamsCount(), 1);
+        clearInteractions(mockHost); // Clear interactions to verify newStream is not called again
+         when(mockHost.newStream( // Re-stub after clearing
+          argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerId)), 
+          any, 
+          any
+        )).thenAnswer((_) async => mockStream);
 
-        // Second send should reuse
+
         final anotherMessage = pb.Message()..pendingBytes = 456;
-        await networkService.sendMessage(testPeerIdStr, anotherMessage);
+        await networkService.sendMessage(parsablePeerIdFullStr, anotherMessage);
 
-        verifyNever(mockHost.newStream(any, any, any)); // Should not be called again for the same peer
-        
+        verifyNever(mockHost.newStream(
+            argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerId)),
+            any,
+            any));
+
         final messageBytes2 = anotherMessage.writeToBuffer();
         final lengthPrefix2 = dart_cid.encodeVarint(messageBytes2.length);
         verify(mockStream.write(lengthPrefix2)).called(1);
@@ -130,10 +158,14 @@ void main() {
       });
 
       test('handles stream write error, closes and removes stream', () async {
-        when(mockHost.newStream(any, any, any)).thenAnswer((_) async => mockStream);
+        when(mockHost.newStream(
+          argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerId)), 
+          any, 
+          any
+        )).thenAnswer((_) async => mockStream);
         when(mockStream.write(any)).thenThrow(Exception('Write failed'));
 
-        await networkService.sendMessage(testPeerIdStr, testMessage);
+        await networkService.sendMessage(parsablePeerIdFullStr, testMessage);
 
         verify(mockStream.close()).called(1);
         expect(networkService.getActiveStreamsCount(), 0);
@@ -150,10 +182,11 @@ void main() {
 
         when(mockStream.read()).thenAnswer((_) async => fullFrame);
 
-        await networkService.handleIncomingStreamForTest(mockStream, mockPeerId); // Use a test helper
+        // mockPeerId is already set up in the outer group's setUp to return expectedBase58PeerId for toBase58()
+        await networkService.handleIncomingStreamForTest(mockStream, mockPeerId);
 
         expect(receivedMessagesLog.length, 1);
-        expect(receivedMessagesLog.first['peerId'], testPeerIdStr);
+        expect(receivedMessagesLog.first['peerId'], expectedBase58PeerId); // Check against the Base58 string
         expect(receivedMessagesLog.first['message'], testPbMessage);
       });
 
@@ -171,9 +204,9 @@ void main() {
 
       test('handles insufficient data for declared message length', () async {
         final smallMessage = pb.Message()..pendingBytes = 10;
-        final messageBytes = smallMessage.writeToBuffer(); // Corrected: call on Message object
+        final messageBytes = smallMessage.writeToBuffer();
         final lengthPrefix = dart_cid.encodeVarint(messageBytes.length + 5); // Declare longer length
-        final fullFrame = Uint8List.fromList([...lengthPrefix, ...messageBytes]); // Data is shorter
+        final fullFrame = Uint8List.fromList([...lengthPrefix, ...messageBytes]);
 
         when(mockStream.read()).thenAnswer((_) async => fullFrame);
         await networkService.handleIncomingStreamForTest(mockStream, mockPeerId);
@@ -191,19 +224,24 @@ void main() {
         await networkService.handleIncomingStreamForTest(mockStream, mockPeerId);
 
         expect(receivedMessagesLog.length, 1);
-        expect(receivedMessagesLog.first['peerId'], testPeerIdStr);
+        expect(receivedMessagesLog.first['peerId'], expectedBase58PeerId); // Check against Base58
         expect(receivedMessagesLog.first['message'], testPbMessage);
         // Verify warning for extra data (would need log spy or similar)
       });
     });
     
     test('handlePeerDisconnected closes and removes stream', () async {
-      // Add a stream
-      when(mockHost.newStream(any, any, any)).thenAnswer((_) async => mockStream);
-      await networkService.sendMessage(testPeerIdStr, pb.Message());
+      // Add a stream using the parsable full CID string
+      when(mockHost.newStream(
+        argThat(isA<libp2p.PeerId>().having((p) => p.toBase58(), 'toBase58', expectedBase58PeerId)), 
+        any, 
+        any
+      )).thenAnswer((_) async => mockStream);
+      await networkService.sendMessage(parsablePeerIdFullStr, pb.Message());
       expect(networkService.getActiveStreamsCount(), 1);
 
-      await networkService.handlePeerDisconnected(testPeerIdStr);
+      // handlePeerDisconnected uses the string key that was used to add the stream
+      await networkService.handlePeerDisconnected(parsablePeerIdFullStr);
       
       verify(mockStream.close()).called(1);
       expect(networkService.getActiveStreamsCount(), 0);
