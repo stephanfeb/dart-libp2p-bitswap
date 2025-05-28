@@ -69,85 +69,102 @@ class BitswapNetworkService {
 
   // Handles a new incoming libp2p stream for the Bitswap protocol
   // This method's signature might still need adjustment based on your Host.setStreamHandler
-  Future<void> onIncomingStream(libp2p.P2PStream stream, libp2p.PeerId peerIdObj) async { // Renamed
-    final peerId = peerIdObj.toBase58(); // Changed from toString() to toBase58()
+  Future<void> onIncomingStream(libp2p.P2PStream stream, libp2p.PeerId peerIdObj) async {
+    final peerId = peerIdObj.toBase58();
     print('// BSW_LOG: BitswapNetworkService: Received incoming Bitswap stream ${stream.id} from $peerId');
     print('Received incoming Bitswap stream from $peerId');
 
+    final BytesBuilder bytesBuilder = BytesBuilder();
+    int? messageLength;
+    int? varintBytesConsumed;
+    const maxVarintLen = 9; // Max length for a 64-bit varint
+
     try {
-      // Assuming stream.read() returns a Uint8List containing one complete
-      // "upstream framed block", which in turn contains the varint-prefixed Bitswap message.
-      final Uint8List upstreamFrameData = await stream.read(); 
-      print('// BSW_LOG: BitswapNetworkService: Read ${upstreamFrameData.length} bytes from stream ${stream.id} from $peerId.');
-
-      if (upstreamFrameData.isEmpty) {
-        print('// BSW_LOG: BitswapNetworkService: Stream from $peerId read empty data frame.');
-        print('Stream from $peerId read empty data frame.');
-        return;
-      }
-
-      // 1. Decode the varint length prefix from the start of upstreamFrameData
-      // CRITICAL: The p2p_varint.decodeVarint API and how to get bytesConsumed is vital here.
-      // The following is a placeholder and likely needs adjustment based on your varint utility.
-      int messageLength;
-      int varintBytesConsumed;
-
-      try {
-        // Use dart_cid.decodeVarint which returns a MapEntry<int, int>
-        // where key is the decoded value (messageLength)
-        // and value is the number of bytes consumed for the varint (varintBytesConsumed)
-        final decodedVarint = dart_cid.decodeVarint(upstreamFrameData);
-        messageLength = decodedVarint.key;
-        varintBytesConsumed = decodedVarint.value;
-        print('// BSW_LOG: BitswapNetworkService: Decoded varint from $peerId. MessageLength: $messageLength, VarintBytesConsumed: $varintBytesConsumed.');
-        
-        if (varintBytesConsumed <= 0) {
-          print('// BSW_LOG: BitswapNetworkService: Error: Varint decoding resulted in 0 or negative bytes consumed from $peerId.');
-          print('Error: Varint decoding resulted in 0 or negative bytes consumed from $peerId.');
+      // Loop to read data until we can parse the varint length prefix
+      while (true) {
+        final Uint8List chunk = await stream.read();
+        if (chunk.isEmpty) {
+          print('// BSW_LOG: BitswapNetworkService: Stream from $peerId closed while reading for varint prefix. Buffer length: ${bytesBuilder.length}');
+          if (bytesBuilder.isEmpty) return; // No data received at all
+          // If some data was received but not enough for a full message, it's an error or incomplete message.
+          print('// BSW_LOG: BitswapNetworkService: Incomplete message from $peerId, stream closed. Discarding ${bytesBuilder.length} buffered bytes.');
           return;
         }
+        bytesBuilder.add(chunk);
+        print('// BSW_LOG: BitswapNetworkService: Read chunk of ${chunk.length} bytes from $peerId. Total buffered: ${bytesBuilder.length}');
 
-        if (varintBytesConsumed > upstreamFrameData.length) {
-            print('// BSW_LOG: BitswapNetworkService: Error: Varint prefix itself is longer than received data from $peerId. VarintBytes: $varintBytesConsumed, FrameLen: ${upstreamFrameData.length}');
-            print('Error: Varint prefix itself is longer than received data from $peerId.');
-            return;
+        if (bytesBuilder.length >= 1) { // Need at least 1 byte to attempt varint decoding
+          try {
+            final decodedVarint = dart_cid.decodeVarint(bytesBuilder.toBytes()); // Use toBytes() to get a copy
+            messageLength = decodedVarint.key;
+            varintBytesConsumed = decodedVarint.value;
+            print('// BSW_LOG: BitswapNetworkService: Decoded varint from $peerId. MessageLength: $messageLength, VarintBytesConsumed: $varintBytesConsumed. Buffered: ${bytesBuilder.length}');
+            
+            if (varintBytesConsumed! <= 0) {
+              print('// BSW_LOG: BitswapNetworkService: Error: Varint decoding resulted in 0 or negative bytes consumed from $peerId.');
+              return;
+            }
+            // Successfully decoded varint, break from this loop to proceed to message body reading
+            break; 
+          } catch (e) {
+            if (bytesBuilder.length >= maxVarintLen) {
+              // If we've read maxVarintLen bytes and still can't decode, it's likely a bad varint.
+              print('// BSW_LOG: BitswapNetworkService: Error decoding varint prefix from $peerId after ${bytesBuilder.length} bytes. Error: $e');
+              return;
+            }
+            // Not enough bytes to decode varint yet, or a partial varint. Continue reading.
+            print('// BSW_LOG: BitswapNetworkService: Could not decode varint yet from $peerId (buffered: ${bytesBuilder.length}, error: $e). Reading more.');
+          }
         }
+      }
 
-      } catch (e) {
-        print('// BSW_LOG: BitswapNetworkService: Error decoding varint prefix from $peerId. Data: $upstreamFrameData. Error: $e');
-        print('Error decoding varint prefix from $peerId. Data: $upstreamFrameData. Error: $e');
+      // At this point, messageLength and varintBytesConsumed are set.
+      final int totalExpectedLength = varintBytesConsumed! + messageLength!;
+      print('// BSW_LOG: BitswapNetworkService: Expecting total message length (prefix + payload) of $totalExpectedLength bytes from $peerId.');
+
+      // Loop to read the rest of the message body if not all received yet
+      while (bytesBuilder.length < totalExpectedLength) {
+        final Uint8List chunk = await stream.read();
+        if (chunk.isEmpty) {
+          print('// BSW_LOG: BitswapNetworkService: Stream from $peerId closed while reading message body. Expected $totalExpectedLength, got ${bytesBuilder.length}.');
+          print('// BSW_LOG: BitswapNetworkService: Incomplete message body from $peerId. Discarding.');
+          return;
+        }
+        bytesBuilder.add(chunk);
+        print('// BSW_LOG: BitswapNetworkService: Read body chunk of ${chunk.length} bytes from $peerId. Total buffered: ${bytesBuilder.length} / $totalExpectedLength');
+      }
+
+      // We have enough data (or more, if messages are pipelined, though we don't handle that yet)
+      final Uint8List allReceivedData = bytesBuilder.toBytes();
+
+      if (allReceivedData.length < totalExpectedLength) {
+         // This should ideally not be reached if the loop above works correctly with stream closure checks
+        print('// BSW_LOG: BitswapNetworkService: Received data from $peerId is still too short after read loop. Expected: $totalExpectedLength, Got: ${allReceivedData.length}');
         return;
       }
       
-      // 2. Check if we have the full message payload
-      if (upstreamFrameData.length < varintBytesConsumed + messageLength) {
-        print('// BSW_LOG: BitswapNetworkService: Received data frame from $peerId is too short for declared message length. Frame: ${upstreamFrameData.length}, Varint: $varintBytesConsumed, MsgLen: $messageLength');
-        print('Received data frame from $peerId is too short for declared message length. Frame: ${upstreamFrameData.length}, Varint: $varintBytesConsumed, MsgLen: $messageLength');
-        // This implies the "upstream framing" is not giving us one full Bitswap message + prefix,
-        // or there's an issue with varint decoding.
-        return;
-      }
-
-      // 3. Extract the protobuf payload
+      // Extract the specific message payload
       final messagePayloadBytes = Uint8List.sublistView(
-          upstreamFrameData, varintBytesConsumed, varintBytesConsumed + messageLength);
+          allReceivedData, varintBytesConsumed!, totalExpectedLength);
       print('// BSW_LOG: BitswapNetworkService: Extracted message payload of ${messagePayloadBytes.length} bytes for $peerId.');
-
-      // 4. Deserialize the message
+      
+      // Deserialize the message
       final message = pb.Message.fromBuffer(messagePayloadBytes);
       print('// BSW_LOG: BitswapNetworkService: Deserialized message from $peerId. Calling message handler.');
       _messageHandler(peerId, message);
 
-      // TODO: If upstreamFrameData can contain more data after this Bitswap message,
-      // that needs to be handled (e.g., if multiple Bitswap messages are packed into one upstream frame).
-      // For now, assuming one Bitswap message per upstream frame.
-      if (upstreamFrameData.length > varintBytesConsumed + messageLength) {
-          print("// BSW_LOG: BitswapNetworkService: WARN: Extra data received in upstream frame after Bitswap message from $peerId. Ignoring ${upstreamFrameData.length - (varintBytesConsumed + messageLength)} bytes.");
-          print("WARN: Extra data received in upstream frame after Bitswap message from $peerId. Ignoring ${upstreamFrameData.length - (varintBytesConsumed + messageLength)} bytes.");
+      // Basic handling for extra data: if more data was received than one message,
+      // it implies pipelining or a framing issue not handled here.
+      // A more robust solution would re-process the remainder of allReceivedData.
+      if (allReceivedData.length > totalExpectedLength) {
+          print("// BSW_LOG: BitswapNetworkService: WARN: Extra data received in stream after full Bitswap message from $peerId. Total received: ${allReceivedData.length}, Processed: $totalExpectedLength. Ignoring ${allReceivedData.length - totalExpectedLength} bytes.");
+          // For a truly robust system, you'd take allReceivedData.sublist(totalExpectedLength)
+          // and feed it back into the start of a new message processing cycle for this stream.
+          // This example does not implement such re-entrancy for simplicity.
       }
 
-    } catch (e) {
-      print('// BSW_LOG: BitswapNetworkService: Error processing message from $peerId on stream ${stream.id}: $e');
+    } catch (e, s) {
+      print('// BSW_LOG: BitswapNetworkService: Error processing message from $peerId on stream ${stream.id}: $e\nStack: $s');
       print('Error processing message from $peerId on stream: $e');
       // Consider closing the stream or other error handling.
     } finally {
