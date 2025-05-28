@@ -39,6 +39,7 @@ class Bitswap {
     _wantManager = WantManager();
     _networkService = BitswapNetworkService(_host, handleIncomingMessage); // Updated method name
     _networkService.start(); // Start listening for network messages
+    print('// BSW_LOG: Bitswap constructor: Network service started.');
 
     // Listen to the provided stream for peer connectedness changes
     try {
@@ -47,21 +48,27 @@ class Bitswap {
         // No need for 'if (event is libp2p.EvtPeerConnectednessChanged)' if stream is correctly typed.
         if (event is libp2p.EvtPeerConnectednessChanged) {
           if (event.connectedness == libp2p.Connectedness.notConnected) {
+            print('// BSW_LOG: Peer connectedness changed: ${event.peer.toString()} is NOT CONNECTED.');
             onPeerDisconnected(event.peer); // Updated method name
           } else if (event.connectedness == libp2p.Connectedness.connected) {
             // Handle peer connected if needed in the future
+            print('// BSW_LOG: Peer connectedness changed: ${event.peer.toString()} is CONNECTED.');
             print('Bitswap: Peer connected: ${event.peer.toString()}');
           }
         }
       });
+      print('// BSW_LOG: Bitswap: Listening to provided peer connectedness event stream.');
       print('Bitswap: Listening to provided peer connectedness event stream.');
     } catch (e) {
+      print('// BSW_LOG: Bitswap: Error listening to peer connectedness event stream: $e. Disconnection cleanup might not work.');
       print('Bitswap: Error listening to peer connectedness event stream: $e. Disconnection cleanup might not work.');
     }
+    print('// BSW_LOG: Bitswap instance created for host: ${_host.id.toBase58()}.');
     print('Bitswap instance created and network service started.');
   }
 
   Future<void> stop() async {
+    print('// BSW_LOG: Bitswap stopping...');
     print('Bitswap stopping...');
     await _connectednessChangeSubscription?.cancel(); // Reverted to cancel()
     await _networkService.stop();
@@ -71,6 +78,7 @@ class Bitswap {
   // Made package-private for testability. Ideally, use DI or other patterns.
   void onPeerDisconnected(libp2p.PeerId peerId) {
     final peerIdStr = peerId.toString();
+    print('// BSW_LOG: onPeerDisconnected: $peerIdStr');
     print('Bitswap: Peer disconnected: $peerIdStr. Cleaning up...');
     _activeBitswapPeers.remove(peerIdStr);
     _wantManager.clearPeerWantlist(peerIdStr);
@@ -82,6 +90,7 @@ class Bitswap {
   // This method will be passed to BitswapNetworkService
   // Made package-private for testability. Ideally, use DI or other patterns.
   void handleIncomingMessage(String peerId, pb.Message message) {
+    print('// BSW_LOG: handleIncomingMessage from $peerId. HasWantlist: ${message.hasWantlist()}, PayloadCount: ${message.payload.length}, PresenceCount: ${message.blockPresences.length}');
     // Process wantlist entries
     if (message.hasWantlist()) {
       _handleWantlist(peerId, message.wantlist);
@@ -104,12 +113,15 @@ class Bitswap {
   }
 
   void _handleWantlist(String peerId, pb.Message_Wantlist wantlist) async {
+    print('// BSW_LOG: _handleWantlist from $peerId. Entries: ${wantlist.entries.length}, Full: ${wantlist.full}');
     print('Received wantlist from $peerId: ${wantlist.entries.length} entries, full: ${wantlist.full}');
     
     // When we successfully handle a message from a peer, consider them an active Bitswap peer.
     _activeBitswapPeers.add(peerId);
+    print('// BSW_LOG: _handleWantlist: Added $peerId to active Bitswap peers.');
 
     if (wantlist.full) {
+      print('// BSW_LOG: _handleWantlist: Received full wantlist from $peerId. Clearing existing wants for this peer.');
       print('Received full wantlist from $peerId. Clearing existing wants for this peer.');
       // Assuming WantManager has a method to clear all wants for a specific peer.
       // This method will need to be implemented in WantManager if it doesn't exist.
@@ -121,15 +133,19 @@ class Bitswap {
       try {
         cid = dart_cid.CID.fromBytes(Uint8List.fromList(entry.block));
       } catch (e) {
+        print('// BSW_LOG: _handleWantlist: Error parsing CID from wantlist entry from $peerId: $e. Entry: ${entry.toDebugString()}');
         print('Error parsing CID from wantlist entry from $peerId: $e');
         continue; // Skip this invalid entry
       }
 
+      print('// BSW_LOG: _handleWantlist: Processing entry for CID $cid from $peerId. Cancel: ${entry.cancel}, WantType: ${entry.wantType}, Priority: ${entry.priority}, SendDontHave: ${entry.sendDontHave}');
       if (entry.cancel) {
+        print('// BSW_LOG: _handleWantlist: Peer $peerId cancelled want for CID $cid');
         print('Peer $peerId cancelled want for CID $cid');
         _wantManager.removePeerWant(peerId, cid);
         // TODO: Stop any in-progress sending efforts for this block to this peer
       } else {
+        print('// BSW_LOG: _handleWantlist: Peer $peerId wants CID $cid, type: ${entry.wantType}, priority: ${entry.priority}, sendDontHave: ${entry.sendDontHave}');
         print('Peer $peerId wants CID $cid, type: ${entry.wantType}, priority: ${entry.priority}, sendDontHave: ${entry.sendDontHave}');
         _wantManager.addPeerWant(
           peerId,
@@ -141,10 +157,12 @@ class Bitswap {
 
         // Respond to the want
         bool hasBlock = await _blockStore.has(cid);
+        print('// BSW_LOG: _handleWantlist: Checked blockStore for $cid. HasBlock: $hasBlock');
 
         if (entry.wantType == pb.Message_Wantlist_WantType.Block) {
           if (hasBlock) {
             final blockData = await _blockStore.get(cid);
+            print('// BSW_LOG: _handleWantlist: Retrieved block $cid from blockStore. Data length: ${blockData?.length}');
             if (blockData != null) {
               // final prefix = [cid.codec, codecNameToCode[cid.codecName]];
               BytesBuilder prefixBuilder = BytesBuilder() ;
@@ -183,6 +201,7 @@ class Bitswap {
                 ..prefix = prefixBuilder.toBytes()
                 ..data = blockData;
               final responseMessage = pb.Message()..payload.add(blockProto);
+              print('// BSW_LOG: _handleWantlist: Sending block $cid to $peerId');
               print('Sending block $cid to $peerId');
               _networkService.sendMessage(peerId, responseMessage);
             }
@@ -191,6 +210,7 @@ class Bitswap {
               ..cid = cid.toBytes()
               ..type = pb.Message_BlockPresenceType.DontHave;
             final responseMessage = pb.Message()..blockPresences.add(presenceProto);
+            print('// BSW_LOG: _handleWantlist: Sending DONT_HAVE for $cid to $peerId (block not found, sendDontHave true)');
             print('Sending DONT_HAVE for $cid to $peerId');
             _networkService.sendMessage(peerId, responseMessage);
           }
@@ -200,6 +220,7 @@ class Bitswap {
               ..cid = cid.toBytes()
               ..type = pb.Message_BlockPresenceType.Have;
             final responseMessage = pb.Message()..blockPresences.add(presenceProto);
+            print('// BSW_LOG: _handleWantlist: Sending HAVE for $cid to $peerId');
             print('Sending HAVE for $cid to $peerId');
             _networkService.sendMessage(peerId, responseMessage);
           } else if (entry.sendDontHave) {
@@ -207,6 +228,7 @@ class Bitswap {
               ..cid = cid.toBytes()
               ..type = pb.Message_BlockPresenceType.DontHave;
             final responseMessage = pb.Message()..blockPresences.add(presenceProto);
+            print('// BSW_LOG: _handleWantlist: Sending DONT_HAVE for $cid to $peerId (HAVE type, block not found, sendDontHave true)');
             print('Sending DONT_HAVE for $cid to $peerId');
             _networkService.sendMessage(peerId, responseMessage);
           }
@@ -216,6 +238,7 @@ class Bitswap {
   }
 
   void _handleReceivedBlock(String peerId, pb.Message_Block blockProto) async {
+    print('// BSW_LOG: _handleReceivedBlock from $peerId. Prefix hex: ${hex.encode(blockProto.prefix)}, Data length: ${blockProto.data.length}.');
     print('Received block from $peerId. Prefix length: ${blockProto.prefix.length}, Data length: ${blockProto.data.length}.');
 
     final Uint8List prefixBytes = Uint8List.fromList(blockProto.prefix);
@@ -316,18 +339,23 @@ class Bitswap {
       // Step 4: Construct the full `CID` object.
       receivedCid = dart_cid.CID(cidVersion, cidCodec, fullMultihashBytes);
 
+      print('// BSW_LOG: _handleReceivedBlock: Successfully reconstructed CID: $receivedCid from $peerId.');
       print('Successfully reconstructed CID: $receivedCid from $peerId.');
 
       if (_wantManager.isWantingLocally(receivedCid)) { 
+        print('// BSW_LOG: _handleReceivedBlock: CID $receivedCid was wanted. Storing block.');
         await _blockStore.put(receivedCid, dataBytes);
         _wantManager.blockReceived(receivedCid, dataBytes); 
+        print('// BSW_LOG: _handleReceivedBlock: Stored block $receivedCid from $peerId and notified WantManager.');
         print('Stored block $receivedCid from $peerId');
         
         _sendCancelMessages(receivedCid);
       } else {
+        print('// BSW_LOG: _handleReceivedBlock: Received unsolicited block $receivedCid from $peerId. Prefix: ${hex.encode(prefixBytes)}');
         print('Received unsolicited block $receivedCid from $peerId. Prefix: ${hex.encode(prefixBytes)}');
       }
     } catch (e) {
+      print('// BSW_LOG: _handleReceivedBlock: Error processing received block from $peerId: $e. Prefix: ${hex.encode(prefixBytes)}, DataLen: ${dataBytes.length}');
       print('Error processing received block from $peerId: $e. Prefix: ${hex.encode(prefixBytes)}, DataLen: ${dataBytes.length}');
     }
   }
@@ -335,6 +363,7 @@ class Bitswap {
   void _handleBlockPresence(String peerId, pb.Message_BlockPresence presence) {
     try {
       final cid = dart_cid.CID.fromBytes(Uint8List.fromList(presence.cid)); 
+      print('// BSW_LOG: _handleBlockPresence from $peerId for CID $cid: ${presence.type}');
       _activeBitswapPeers.add(peerId);
       print('Received block presence from $peerId for CID $cid: ${presence.type}');
       if (presence.type == pb.Message_BlockPresenceType.Have) {
@@ -343,12 +372,14 @@ class Bitswap {
         _wantManager.receivedDontHave(peerId, cid);
       }
     } catch (e) {
+      print('// BSW_LOG: _handleBlockPresence: Error parsing CID from block presence from $peerId: $e');
       print('Error parsing CID from block presence from $peerId: $e');
     }
   }
 
   // Method to request blocks from the network
   Future<void> wantBlocks(List<dart_cid.CID> cidsToWant) async { 
+    print('// BSW_LOG: wantBlocks called with ${cidsToWant.length} CIDs: ${cidsToWant.map((c) => c.toString()).join(', ')}');
     if (cidsToWant.isEmpty) return;
 
     final wantlistEntries = <pb.Message_Wantlist_Entry>[];
@@ -364,6 +395,7 @@ class Bitswap {
     }
     
     if (wantlistEntries.isEmpty) {
+      print('// BSW_LOG: wantBlocks: No new wants to send after checking WantManager.');
       print('No new wants to send.');
       return;
     }
@@ -371,11 +403,14 @@ class Bitswap {
     final wantlistProto = pb.Message_Wantlist()..entries.addAll(wantlistEntries);
     final message = pb.Message()..wantlist = wantlistProto;
 
+    print('// BSW_LOG: wantBlocks: Wanting ${wantlistEntries.length} blocks. Broadcasting wantlist.');
     print('Wanting ${wantlistEntries.length} blocks. Broadcasting wantlist.');
     
     final List<String> bitswapPeers = await _getBitswapPeers(); // Added await
+    print('// BSW_LOG: wantBlocks: Peers to send wantlist to: $bitswapPeers');
 
     if (bitswapPeers.isEmpty) {
+      print('// BSW_LOG: wantBlocks: No known Bitswap peers to send wantlist to.');
       print('No known Bitswap peers to send wantlist to.');
       // TODO: Potentially queue the wantlist or try discovery / connect to seed peers.
     }
@@ -383,6 +418,7 @@ class Bitswap {
     // If we are already connected to peers, send the wantlist immediately.
     // Otherwise, the want is in the wantlist and will be sent when peers connect.
     for (final peerId in bitswapPeers) {
+      print('// BSW_LOG: wantBlocks: Sending wantlist to peer $peerId for ${wantlistEntries.length} CIDs.');
       print('Sending wantlist to peer $peerId for ${wantlistEntries.length} CIDs.');
       _networkService.sendMessage(peerId, message);
       // Record that we've sent these wants to this peer
@@ -393,6 +429,7 @@ class Bitswap {
             final cidForRecording = dart_cid.CID.fromBytes(Uint8List.fromList(entryProto.block));
             _wantManager.recordWantSentToPeer(cidForRecording, peerId);
         } catch (e) {
+            print('// BSW_LOG: wantBlocks: Error creating CID for recording sent want to $peerId: $e');
             print('Error creating CID for recording sent want to $peerId: $e');
         }
       }
@@ -400,10 +437,12 @@ class Bitswap {
   }
 
   Future<List<String>> _getBitswapPeers() async { // Made async, returns Future
+    print('// BSW_LOG: _getBitswapPeers: Starting peer discovery.');
     final Set<String> peers = {}; // Use a set to avoid duplicates
 
     // Prioritize already known active Bitswap peers
     peers.addAll(_activeBitswapPeers);
+    print('// BSW_LOG: _getBitswapPeers: Initial active peers: $_activeBitswapPeers');
 
     // Discover other connected peers supporting Bitswap
     // Assumes dart_libp2p Host API:
@@ -416,15 +455,21 @@ class Bitswap {
       // And conn.remotePeer is a PeerId object.
       // And _host.peerStore.getPeer(PeerId) returns a Future<PeerInfo?>.
       final connections = _host.network.conns;
+      print('// BSW_LOG: _getBitswapPeers: Found ${connections.length} connections from host.network.conns.');
       for (final conn in connections) {
         final remotePeerId = conn.remotePeer; // This should be a libp2p.PeerId
+        print('// BSW_LOG: _getBitswapPeers: Checking connection to ${remotePeerId.toBase58()}');
         final peerInfo = await _host.peerStore.getPeer(remotePeerId); // Added await
         
         if (peerInfo != null && peerInfo.protocols.contains(_networkService.protocolId)) {
           peers.add(remotePeerId.toBase58()); // Use toBase58() instead of toString()
+          print('// BSW_LOG: _getBitswapPeers: Peer ${remotePeerId.toBase58()} supports Bitswap. Protocols: ${peerInfo.protocols}');
+        } else {
+          print('// BSW_LOG: _getBitswapPeers: Peer ${remotePeerId.toBase58()} does NOT support Bitswap or peerInfo is null. PeerInfo: ${peerInfo}, Protocols: ${peerInfo?.protocols}');
         }
       }
     } catch (e) {
+      print('// BSW_LOG: _getBitswapPeers: Error querying connected peers for Bitswap support: $e. Falling back to known active peers.');
       print('Error querying connected peers for Bitswap support: $e. Falling back to known active peers.');
       // If there's an error (e.g., API assumptions are wrong),
       // we rely on the initially added _activeBitswapPeers.
@@ -432,12 +477,15 @@ class Bitswap {
     }
 
     if (peers.isEmpty && _activeBitswapPeers.isEmpty) { // Adjusted condition to avoid warning if _activeBitswapPeers had content
+      print('// BSW_LOG: _getBitswapPeers: WARN: Found no Bitswap-supporting peers after checking active and connected peers.');
       print('WARN: _getBitswapPeers() found no Bitswap-supporting peers after checking active and connected peers.');
     }
+    print('// BSW_LOG: _getBitswapPeers: Final list of Bitswap peers: ${peers.toList()}');
     return peers.toList();
   }
 
   void _sendCancelMessages(dart_cid.CID cid) { 
+    print('// BSW_LOG: _sendCancelMessages for CID $cid');
     // Construct a CANCEL message
     final cancelEntry = pb.Message_Wantlist_Entry()
       ..block = cid.toBytes()
@@ -446,13 +494,16 @@ class Bitswap {
     final cancelMessage = pb.Message()..wantlist = cancelWantlist;
 
     final Set<String> peersToCancel = _wantManager.getPeersSentWantForCid(cid);
+    print('// BSW_LOG: _sendCancelMessages: Peers to send CANCEL to for $cid: $peersToCancel');
 
     if (peersToCancel.isEmpty) {
+      print('// BSW_LOG: _sendCancelMessages: No peers to send CANCEL for CID $cid.');
       print('No peers to send CANCEL for CID $cid.');
       return;
     }
 
     for (final peerId in peersToCancel) {
+      print('// BSW_LOG: _sendCancelMessages: Sending CANCEL for CID $cid to peer $peerId');
       print('Sending CANCEL for CID $cid to peer $peerId');
       _networkService.sendMessage(peerId, cancelMessage);
     }
@@ -469,17 +520,21 @@ class Bitswap {
   /// It returns a Future that completes with the block data (Uint8List) when available,
   /// or null if the block cannot be retrieved (e.g., not found after timeout - timeout not yet implemented).
   Future<Uint8List?> getBlock(dart_cid.CID cid) async {
+    print('// BSW_LOG: getBlock called for CID $cid');
     // 1. Check local store first
     if (await _blockStore.has(cid)) {
+      print('// BSW_LOG: getBlock: Block $cid found in local store.');
       print('Block $cid found in local store.');
       return _blockStore.get(cid);
     }
 
+    print('// BSW_LOG: getBlock: Block $cid not in local store. Adding to wantlist and attempting to fetch.');
     print('Block $cid not in local store. Adding to wantlist and attempting to fetch.');
     // 2. Add to wantlist (this ensures a Completer is ready in WantManager)
     // wantBlocks will call addLocalWant internally.
     // We call wantBlocks to ensure the want is broadcast if necessary.
     await wantBlocks([cid]);
+    print('// BSW_LOG: getBlock: Called wantBlocks for $cid. Now waiting on whenBlockReceived.');
 
     // 3. Get the future from WantManager that will complete when the block is received.
     // This relies on wantBlocks having successfully added the want to the _wantManager.
@@ -488,10 +543,12 @@ class Bitswap {
       // TODO: Make timeout configurable
       return await _wantManager.whenBlockReceived(cid).timeout(const Duration(seconds: 30));
     } on TimeoutException {
+      print('// BSW_LOG: getBlock: Timeout waiting for block $cid');
       print('Timeout waiting for block $cid');
       _wantManager.removeLocalWant(cid); // Clean up the want if it timed out
       return null;
     } catch (e) {
+      print('// BSW_LOG: getBlock: Error while waiting for block $cid: $e');
       print('Error while waiting for block $cid: $e');
       _wantManager.removeLocalWant(cid); // Clean up
       return null;

@@ -61,15 +61,15 @@ void main() {
     // mockEventBusSubscription = MockTestEventSubscription<libp2p.EvtPeerConnectednessChanged>(); // No longer directly needed
 
     testPeerId1 = MockPeerId(); 
-    when(testPeerId1.toBase58()).thenReturn(testPeerId1Str); // Changed from toString() to toBase58()
+    when(testPeerId1.toBase58()).thenReturn(testPeerId1Str); 
     
-    // final hostMockPeerId = MockPeerId(); // Still keeping host.peerId stub removed for now
-    // when(hostMockPeerId.toString()).thenReturn("QmHostPeer");
+    final hostMockPeerId = MockPeerId(); 
+    when(hostMockPeerId.toBase58()).thenReturn("QmHostPeerIdForTest"); // Example Peer ID string for the host
+    when(mockHost.id).thenReturn(hostMockPeerId); // Stub for mockHost.id
 
     when(mockHost.eventBus).thenReturn(mockEventBus);
     when(mockHost.network).thenReturn(mockNetwork);
     when(mockHost.peerStore).thenReturn(mockPeerStore);
-    // when(mockHost.peerId).thenReturn(hostMockPeerId); 
 
     peerConnectednessEventController = StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
     // The following lines related to mockEventBus.subscribe and mockEventBusSubscription are removed
