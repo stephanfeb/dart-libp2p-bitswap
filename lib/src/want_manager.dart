@@ -1,24 +1,28 @@
+import 'dart:async'; // For Completer
+import 'dart:typed_data'; // For Uint8List
+
 import './proto/bitswap_message.pb.dart' as pb;
-import 'package:dart_cid/dart_cid.dart'; // Reverting to standard package import
+import 'package:dart_cid/dart_cid.dart'; 
 
 // Represents an entry in a wantlist
 class WantlistEntry {
-  final CID cid; // Changed Cid to CID
+  final CID cid; 
   final int priority;
   final pb.Message_Wantlist_WantType wantType;
   final bool sendDontHave;
   final Set<String> peersSentTo; // Peers to whom this want has been sent
+  final Completer<Uint8List> completer; // For notifying when block is received
 
   WantlistEntry({
-    required this.cid, // Changed Cid to CID
+    required this.cid, 
     this.priority = 1,
     this.wantType = pb.Message_Wantlist_WantType.Block,
     this.sendDontHave = false,
-  }) : peersSentTo = {};
+  }) : peersSentTo = {}, completer = Completer<Uint8List>();
 
   @override
   String toString() {
-    return 'WantlistEntry(cid: $cid, priority: $priority, type: $wantType, sendDontHave: $sendDontHave, peersSentTo: ${peersSentTo.length})';
+    return 'WantlistEntry(cid: $cid, priority: $priority, type: $wantType, sendDontHave: $sendDontHave, peersSentTo: ${peersSentTo.length}, hasCompleter: ${completer != null})';
   }
 }
 
@@ -38,30 +42,43 @@ class WantManager {
   // --- Local Wantlist Management ---
 
   // Add a block to the local wantlist
-  // Returns the entry, or null if it already existed with the same wantType
-  WantlistEntry? addLocalWant(CID cid, { // Changed Cid to CID
+  // Returns the entry. If it already existed with the same wantType, returns the existing entry.
+  WantlistEntry addLocalWant(CID cid, { 
     int priority = 1,
     pb.Message_Wantlist_WantType wantType = pb.Message_Wantlist_WantType.Block,
     bool sendDontHave = false,
   }) {
     final cidStr = cid.toString();
     if (_localWantlist.containsKey(cidStr) && _localWantlist[cidStr]!.wantType == wantType) {
-      // Already wanting with same type, perhaps update priority or peersSentTo if needed
-      return null; 
+      // Already wanting with same type, return existing entry
+      print('Local want for $cidStr already exists with same type. Returning existing entry.');
+      return _localWantlist[cidStr]!;
     }
+    // If it exists but with a different wantType, or doesn't exist, create/overwrite.
     final entry = WantlistEntry(
-      cid: cid, // Changed Cid to CID
+      cid: cid, 
       priority: priority,
       wantType: wantType,
       sendDontHave: sendDontHave,
     );
     _localWantlist[cidStr] = entry;
-    print('Added to local wantlist: $cidStr');
+    print('Added/Updated local wantlist for: $cidStr');
     return entry;
   }
 
+  Future<Uint8List> whenBlockReceived(CID cid) {
+    final cidStr = cid.toString();
+    final entry = _localWantlist[cidStr];
+    if (entry != null) {
+      return entry.completer.future;
+    }
+    // If not currently wanting, return a future that will complete with an error.
+    // This indicates a programming error if getBlock is called without wantBlocks ensuring the want exists.
+    return Future.error(StateError('Block $cidStr was not in the local wantlist when whenBlockReceived was called.'));
+  }
+
   // Call this when a local want is sent to a specific peer
-  void recordWantSentToPeer(CID cid, String peerId) { // Changed Cid to CID
+  void recordWantSentToPeer(CID cid, String peerId) { 
     final cidStr = cid.toString();
     _localWantlist[cidStr]?.peersSentTo.add(peerId);
   }
@@ -139,11 +156,17 @@ class WantManager {
 
   // Called when a block is received that we were wanting
   void blockReceived(CID cid, List<int> data) {
-    if (isWantingLocally(cid)) {
+    final cidStr = cid.toString();
+    final entry = _localWantlist[cidStr];
+    if (entry != null) {
       print('Block received that was in local wantlist: $cid');
-      removeLocalWant(cid);
-      // TODO: Notify other parts of the system (e.g., the original requester)
-      // TODO: Send CANCEL messages to peers we asked for this block
+      if (!entry.completer.isCompleted) {
+        entry.completer.complete(Uint8List.fromList(data));
+      }
+      // It's important to remove the want *after* completing the future,
+      // to avoid a race condition where whenBlockReceived might be called after removal but before completion.
+      removeLocalWant(cid); 
+      // TODO: Send CANCEL messages to peers we asked for this block (Bitswap class should handle this after block is stored)
     }
   }
 

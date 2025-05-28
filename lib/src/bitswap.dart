@@ -33,7 +33,7 @@ class Bitswap {
   Bitswap({
     required libp2p.Host host,
     required IBlockStore blockStore,
-    required Stream<libp2p.EvtPeerConnectednessChanged> peerEventsStream, // Added stream parameter
+    required Stream<dynamic> peerEventsStream, // Added stream parameter
   })  : _host = host,
         _blockStore = blockStore {
     _wantManager = WantManager();
@@ -45,11 +45,13 @@ class Bitswap {
       _connectednessChangeSubscription = peerEventsStream.listen((event) {
         // The stream is already typed, so direct access should be fine.
         // No need for 'if (event is libp2p.EvtPeerConnectednessChanged)' if stream is correctly typed.
-        if (event.connectedness == libp2p.Connectedness.notConnected) {
-          onPeerDisconnected(event.peer); // Updated method name
-        } else if (event.connectedness == libp2p.Connectedness.connected) {
-          // Handle peer connected if needed in the future
-          print('Bitswap: Peer connected: ${event.peer.toString()}');
+        if (event is libp2p.EvtPeerConnectednessChanged) {
+          if (event.connectedness == libp2p.Connectedness.notConnected) {
+            onPeerDisconnected(event.peer); // Updated method name
+          } else if (event.connectedness == libp2p.Connectedness.connected) {
+            // Handle peer connected if needed in the future
+            print('Bitswap: Peer connected: ${event.peer.toString()}');
+          }
         }
       });
       print('Bitswap: Listening to provided peer connectedness event stream.');
@@ -378,6 +380,8 @@ class Bitswap {
       // TODO: Potentially queue the wantlist or try discovery / connect to seed peers.
     }
 
+    // If we are already connected to peers, send the wantlist immediately.
+    // Otherwise, the want is in the wantlist and will be sent when peers connect.
     for (final peerId in bitswapPeers) {
       print('Sending wantlist to peer $peerId for ${wantlistEntries.length} CIDs.');
       _networkService.sendMessage(peerId, message);
@@ -457,4 +461,40 @@ class Bitswap {
   // TODO: Add methods for handling peer connections/disconnections for wantlist cleanup etc.
   // For example, when a peer disconnects, their wants in _peerWantlists should be cleared.
   // Also, if we disconnect from a peer, we might need to re-evaluate our local wants.
+
+  /// Retrieves a block by its CID.
+  ///
+  /// This method will first check the local block store. If the block is not found,
+  /// it will add the CID to the wantlist and attempt to fetch it from the network.
+  /// It returns a Future that completes with the block data (Uint8List) when available,
+  /// or null if the block cannot be retrieved (e.g., not found after timeout - timeout not yet implemented).
+  Future<Uint8List?> getBlock(dart_cid.CID cid) async {
+    // 1. Check local store first
+    if (await _blockStore.has(cid)) {
+      print('Block $cid found in local store.');
+      return _blockStore.get(cid);
+    }
+
+    print('Block $cid not in local store. Adding to wantlist and attempting to fetch.');
+    // 2. Add to wantlist (this ensures a Completer is ready in WantManager)
+    // wantBlocks will call addLocalWant internally.
+    // We call wantBlocks to ensure the want is broadcast if necessary.
+    await wantBlocks([cid]);
+
+    // 3. Get the future from WantManager that will complete when the block is received.
+    // This relies on wantBlocks having successfully added the want to the _wantManager.
+    try {
+      // Add a timeout to prevent waiting indefinitely
+      // TODO: Make timeout configurable
+      return await _wantManager.whenBlockReceived(cid).timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      print('Timeout waiting for block $cid');
+      _wantManager.removeLocalWant(cid); // Clean up the want if it timed out
+      return null;
+    } catch (e) {
+      print('Error while waiting for block $cid: $e');
+      _wantManager.removeLocalWant(cid); // Clean up
+      return null;
+    }
+  }
 }

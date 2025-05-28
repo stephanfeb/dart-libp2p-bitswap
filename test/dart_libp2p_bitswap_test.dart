@@ -33,10 +33,15 @@ void main() {
         expect(wantManager.isWantingLocally(cid1), isTrue);
       });
 
-      test('addLocalWant returns null if want already exists with same type', () {
-        wantManager.addLocalWant(cid1, wantType: pb.Message_Wantlist_WantType.Block);
+      test('addLocalWant returns existing entry if want already exists with same type', () {
+        final originalEntry = wantManager.addLocalWant(cid1, wantType: pb.Message_Wantlist_WantType.Block);
+        expect(originalEntry, isNotNull, reason: "First call should return a non-null entry");
+
         final entry = wantManager.addLocalWant(cid1, wantType: pb.Message_Wantlist_WantType.Block);
-        expect(entry, isNull);
+        expect(entry, isNotNull, reason: "Second call should also return a non-null entry");
+        expect(entry, same(originalEntry), reason: "Should return the same instance as the original entry");
+        expect(entry!.cid, cid1);
+        expect(entry.wantType, pb.Message_Wantlist_WantType.Block);
       });
       
       test('addLocalWant adds new entry if want exists with different type', () {
