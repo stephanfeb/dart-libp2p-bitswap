@@ -12,7 +12,7 @@ import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
 
 import 'package:dart_libp2p_bitswap/src/bitswap.dart';
 import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;
-import 'package:dart_cid/dart_cid.dart' as dart_cid;
+import 'package:dcid/dcid.dart' as dart_cid;
 import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
 import 'package:test/test.dart';
 import 'package:mockito/mockito.dart';
@@ -124,10 +124,12 @@ void main() {
       
       b_to_a_clientEnd = YamuxStream(
           id: 1, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
+          maxFrameSize: 16 * 1024,
           sendFrame: (frame) async => frames_b_to_a_out_controller.add(frame),
           parentConn: mockConn_B_client, logPrefix: "TestStream_BtoA_ClientEnd(1)");
       b_to_a_serverEnd = YamuxStream(
           id: 1, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
+          maxFrameSize: 16 * 1024,
           sendFrame: (frame) async => frames_b_to_a_in_controller.add(frame),
           parentConn: mockConn_B_server, logPrefix: "TestStream_BtoA_ServerEnd(1)");
 
@@ -148,10 +150,12 @@ void main() {
 
       a_to_b_clientEnd = YamuxStream(
           id: 2, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
+          maxFrameSize: 16 * 1024,
           sendFrame: (frame) async => frames_a_to_b_out_controller.add(frame),
           parentConn: mockConn_A_client, logPrefix: "TestStream_AtoB_ClientEnd(2)");
       a_to_b_serverEnd = YamuxStream(
           id: 2, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
+          maxFrameSize: 16 * 1024,
           sendFrame: (frame) async => frames_a_to_b_in_controller.add(frame),
           parentConn: mockConn_A_server, logPrefix: "TestStream_AtoB_ServerEnd(2)");
       
@@ -242,7 +246,7 @@ void main() {
       expect(streamHandlerA, isNotNull, reason: "Stream handler for Node A must be captured.");
       // The stream B opened to A is b_to_a_clientEnd, its other end is b_to_a_serverEnd.
       // A's Bitswap handler (onIncomingStream) should be called with b_to_a_serverEnd.
-      if (!b_to_a_serverEnd.isClosed) await b_to_a_serverEnd.open(); // Ensure server end is open
+      // No explicit open needed here; handleFrame on b_to_a_serverEnd should open it upon receiving data.
       await streamHandlerA!(b_to_a_serverEnd, peerIdB);
       
       // Allow BitswapA to process WANT, initiate stream to B, and send BLOCK
@@ -258,7 +262,7 @@ void main() {
       expect(streamHandlerB, isNotNull, reason: "Stream handler for Node B must be captured.");
       // The stream A opened to B is a_to_b_clientEnd, its other end is a_to_b_serverEnd.
       // B's Bitswap handler should be called with a_to_b_serverEnd.
-      if (!a_to_b_serverEnd.isClosed) await a_to_b_serverEnd.open(); // Ensure server end is open
+      // No explicit open needed here; handleFrame on a_to_b_serverEnd should open it upon receiving data.
       await streamHandlerB!(a_to_b_serverEnd, peerIdA);
       
       final receivedBlockOnB = await getBlockFuture.timeout(Duration(seconds: 5), onTimeout: () { // Increased timeout

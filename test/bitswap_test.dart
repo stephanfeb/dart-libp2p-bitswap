@@ -6,7 +6,7 @@ import 'package:dart_libp2p_bitswap/src/bitswap.dart';
 // import 'package:dart_libp2p_bitswap/src/want_manager.dart'; // Used for type hint if injecting - REMOVED
 // import 'package:dart_libp2p_bitswap/src/network_service.dart'; // Used for type hint if injecting - REMOVED
 import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;
-import 'package:dart_cid/dart_cid.dart' as dart_cid;
+import 'package:dcid/dcid.dart' as dart_cid;
 import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
 import 'package:test/test.dart';
 import 'package:mockito/mockito.dart';
@@ -86,6 +86,7 @@ void main() {
     
     // Default stub for newStream (used by internal NetworkService)
     final mockP2PStream = MockP2PStream();
+    when(mockP2PStream.id()).thenReturn('mock-stream-default');
     when(mockP2PStream.write(any)).thenAnswer((_) async {});
     when(mockP2PStream.close()).thenAnswer((_) async {});
     when(mockHost.newStream(any, any, any)).thenAnswer((_) async => mockP2PStream);
@@ -225,8 +226,9 @@ void main() {
 
       // The internal NetworkService will use mockHost.newStream to send the response
       final mockResponseStream = MockP2PStream();
-      // when(mockResponseStream.write(any)).thenAnswer((_) async {}); // Temporarily comment out
-      // when(mockResponseStream.close()).thenAnswer((_) async {}); // Temporarily comment out
+      when(mockResponseStream.id()).thenReturn('mock-response-stream');
+      when(mockResponseStream.write(any)).thenAnswer((_) async {});
+      when(mockResponseStream.close()).thenAnswer((_) async {});
       
       final expectedProtocols = [bitswapProtocolId]; 
 

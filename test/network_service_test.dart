@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:dart_libp2p_bitswap/src/network_service.dart';
 import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;
-import 'package:dart_cid/dart_cid.dart' as dart_cid;
+import 'package:dcid/dcid.dart' as dart_cid;
 import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
 import 'package:test/test.dart';
 import 'package:mockito/mockito.dart';

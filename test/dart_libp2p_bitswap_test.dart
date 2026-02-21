@@ -2,7 +2,7 @@ import 'dart:typed_data'; // Import for Uint8List
 
 import 'package:dart_libp2p_bitswap/src/want_manager.dart';
 import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;
-import 'package:dart_cid/dart_cid.dart' as dart_cid;
+import 'package:dcid/dcid.dart' as dart_cid;
 import 'package:test/test.dart';
 // Mockito is available but not strictly needed for WantManager tests as it has no external dependencies to mock.
 

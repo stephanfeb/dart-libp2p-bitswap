@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:test/test.dart';
-import 'package:dart_cid/dart_cid.dart';
+import 'package:dcid/dcid.dart';
 import 'package:dart_libp2p_bitswap/src/want_manager.dart';
 // Import for pb.Message_Wantlist_WantType if needed, or ensure WantManager handles it internally
 // import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;

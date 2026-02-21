@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
 // Assuming 'varint' package for unsigned varint encoding/decoding
 // If not available, a helper function would be needed.
-import 'package:dart_cid/dart_cid.dart' as dart_cid; // Using varint from dart_libp2p
+import 'package:dcid/dcid.dart' as dart_cid; // Using varint from dart_libp2p
 // Placeholder for varint, actual package might differ or need implementation
 
 import './proto/bitswap_message.pb.dart' as pb;
@@ -42,7 +42,7 @@ class BitswapNetworkService {
       try {
         await stream.close();
       } catch (e) {
-        print('// BSW_LOG: BitswapNetworkService: Error closing stream ${stream.id} during stop: $e');
+        print('// BSW_LOG: BitswapNetworkService: Error closing stream ${stream.id()} during stop: $e');
         print('Error closing stream during stop: $e');
       }
     }
@@ -54,8 +54,8 @@ class BitswapNetworkService {
   Future<void> handlePeerDisconnected(String peerId) async {
     final stream = activeStreams.remove(peerId); // Renamed
     if (stream != null) {
-      print('// BSW_LOG: BitswapNetworkService: Peer $peerId disconnected, closing and removing active stream ${stream.id}.');
-      print('Peer $peerId disconnected, closing and removing active stream ${stream.id}.');
+      print('// BSW_LOG: BitswapNetworkService: Peer $peerId disconnected, closing and removing active stream ${stream.id()}.');
+      print('Peer $peerId disconnected, closing and removing active stream ${stream.id()}.');
       try {
         await stream.close();
       } catch (e) {
@@ -71,7 +71,7 @@ class BitswapNetworkService {
   // This method's signature might still need adjustment based on your Host.setStreamHandler
   Future<void> onIncomingStream(libp2p.P2PStream stream, libp2p.PeerId peerIdObj) async {
     final peerId = peerIdObj.toBase58();
-    print('// BSW_LOG: BitswapNetworkService: Received incoming Bitswap stream ${stream.id} from $peerId');
+    print('// BSW_LOG: BitswapNetworkService: Received incoming Bitswap stream ${stream.id()} from $peerId');
     print('Received incoming Bitswap stream from $peerId');
 
     final BytesBuilder bytesBuilder = BytesBuilder();
@@ -164,14 +164,14 @@ class BitswapNetworkService {
       }
 
     } catch (e, s) {
-      print('// BSW_LOG: BitswapNetworkService: Error processing message from $peerId on stream ${stream.id}: $e\nStack: $s');
+      print('// BSW_LOG: BitswapNetworkService: Error processing message from $peerId on stream ${stream.id()}: $e\nStack: $s');
       print('Error processing message from $peerId on stream: $e');
       // Consider closing the stream or other error handling.
     } finally {
       // If P2PStream is single-message, it might be closed by the libp2p layer after read().
       // If it's a persistent stream, we might not close it here.
       // For now, let's assume the stream lifecycle is managed by the caller or libp2p.
-      print('// BSW_LOG: BitswapNetworkService: Finished processing incoming stream ${stream.id} from $peerId.');
+      print('// BSW_LOG: BitswapNetworkService: Finished processing incoming stream ${stream.id()} from $peerId.');
     }
   }
 
@@ -191,8 +191,8 @@ class BitswapNetworkService {
         print('NetworkService: Calling _host.newStream for peer $peerId ($peerIdObj)');
         try {
           stream = await _host.newStream(peerIdObj, [protocolId], libp2p.Context());
-          print('// BSW_LOG: BitswapNetworkService: _host.newStream completed. Stream ID: ${stream?.id}');
-          print('NetworkService: _host.newStream completed. Stream: ${stream?.id}');
+          print('// BSW_LOG: BitswapNetworkService: _host.newStream completed. Stream ID: ${stream?.id()}');
+          print('NetworkService: _host.newStream completed. Stream: ${stream?.id()}');
         } catch (e, s) {
           print('// BSW_LOG: BitswapNetworkService: Error calling _host.newStream for $peerId: $e\nStack: $s');
           print('NetworkService: Error calling _host.newStream: $e\nStack: $s');
@@ -206,38 +206,38 @@ class BitswapNetworkService {
           return; // Exit if stream is null
         }
         activeStreams[peerId] = stream; // Renamed
-        print('// BSW_LOG: BitswapNetworkService: New stream ${stream.id} to $peerId added to active streams.');
+        print('// BSW_LOG: BitswapNetworkService: New stream ${stream.id()} to $peerId added to active streams.');
         // TODO: Listen for stream close/error events to remove it from activeStreams
         // For example, stream.onClose(() => activeStreams.remove(peerId));
         // or handle errors in the write operation below to remove the stream.
       } else {
-        print('// BSW_LOG: BitswapNetworkService: Reusing existing stream ${stream.id} to $peerId.');
+        print('// BSW_LOG: BitswapNetworkService: Reusing existing stream ${stream.id()} to $peerId.');
         print('Reusing existing stream to $peerId.');
       }
 
       final messageBytes = message.writeToBuffer();
       final lengthPrefix = dart_cid.encodeVarint(messageBytes.length);
-      print('// BSW_LOG: BitswapNetworkService: Sending to $peerId on stream ${stream.id}. Prefix length: ${lengthPrefix.length}, Message length: ${messageBytes.length}.');
+      print('// BSW_LOG: BitswapNetworkService: Sending to $peerId on stream ${stream.id()}. Prefix length: ${lengthPrefix.length}, Message length: ${messageBytes.length}.');
 
       await stream.write(lengthPrefix);
       await stream.write(messageBytes);
       
       // DO NOT close the stream here if we want to reuse it.
       // stream.close(); 
-      print('// BSW_LOG: BitswapNetworkService: Bitswap message sent to $peerId using stream ${stream.id}.');
-      print('Bitswap message sent to $peerId using stream ${stream.id}.');
+      print('// BSW_LOG: BitswapNetworkService: Bitswap message sent to $peerId using stream ${stream.id()}.');
+      print('Bitswap message sent to $peerId using stream ${stream.id()}.');
 
     } catch (e) {
       print('// BSW_LOG: BitswapNetworkService: Error sending Bitswap message to $peerId: $e');
       print('Error sending Bitswap message to $peerId: $e');
       // If an error occurs, the stream might be unusable. Remove it.
       if (stream != null) { // Check if stream was successfully assigned before trying to remove/close
-        print('// BSW_LOG: BitswapNetworkService: Removing and closing stream ${stream.id} to $peerId due to send error.');
+        print('// BSW_LOG: BitswapNetworkService: Removing and closing stream ${stream.id()} to $peerId due to send error.');
         activeStreams.remove(peerId); // Renamed
         try {
           await stream.close(); // Attempt to close it gracefully
         } catch (closeError) {
-          print('// BSW_LOG: BitswapNetworkService: Error closing stream ${stream.id} after send error: $closeError');
+          print('// BSW_LOG: BitswapNetworkService: Error closing stream ${stream.id()} after send error: $closeError');
           print('NetworkService: Error closing stream after send error: $closeError');
         }
       } else {
