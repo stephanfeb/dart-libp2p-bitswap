@@ -33,9 +33,9 @@ If this package is published to pub.dev, add it to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  dart_libp2p_bitswap: ^latest_version # Replace with the actual version
-  dart_libp2p: any # Your dart_libp2p version
-  dart_cid: any    # For CID objects
+  dart_libp2p_bitswap: ^2.0.0
+  dart_libp2p: ^1.0.0
+  dcid: ^1.0.0     # For CID objects
   # other necessary dependencies
 ```
 
@@ -52,136 +52,101 @@ Then run `dart pub get` or `flutter pub get`.
 
 ## Usage
 
-### 1. Implement `IBlockStore`
+### 1. Implement `BlockStore`
 
-The Bitswap service requires a block store to manage blocks. You need to provide an implementation of the `IBlockStore` interface. This interface defines how Bitswap interacts with your application's data storage.
+Bitswap reads blocks it serves from, and writes blocks it fetches to, a `BlockStore` you provide.
 
 ```dart
-import 'package:dart_libp2p_bitswap/dart_libp2p_bitswap.dart';
-import 'package:dart_cid/dart_cid.dart' as dart_cid;
 import 'dart:typed_data';
 
+import 'package:dart_libp2p_bitswap/dart_libp2p_bitswap.dart';
+import 'package:dcid/dcid.dart' as dart_cid;
+
 // A simple in-memory block store for example purposes
-class MyBlockStore implements IBlockStore {
+class MyBlockStore implements BlockStore {
   final Map<String, Uint8List> _storage = {};
 
   @override
-  Future<Uint8List?> get(dart_cid.CID cid) async {
-    print('[MyBlockStore] GET ${cid.toString()}');
-    return _storage[cid.toString()];
-  }
+  Future<Uint8List?> get(dart_cid.CID cid) async => _storage[cid.toString()];
 
   @override
-  Future<bool> has(dart_cid.CID cid) async {
-    final present = _storage.containsKey(cid.toString());
-    print('[MyBlockStore] HAS ${cid.toString()}: $present');
-    return present;
-  }
+  Future<bool> has(dart_cid.CID cid) async => _storage.containsKey(cid.toString());
 
   @override
-  Future<void> put(dart_cid.CID cid, Uint8List data) async {
-    print('[MyBlockStore] PUT ${cid.toString()} (data length: ${data.length})');
-    _storage[cid.toString()] = data;
-    // In a real application, you might notify Bitswap that new blocks are available,
-    // or Bitswap might re-query peers based on updated wantlists.
-  }
+  Future<void> put(dart_cid.CID cid, Uint8List data) async => _storage[cid.toString()] = data;
 }
 ```
 
-### 2. Initialize Bitswap
+### 2. Create and start Bitswap
 
-Instantiate the `Bitswap` class with your configured libp2p `Host` and your `IBlockStore` implementation.
+Construct `Bitswap` with your libp2p `Host` and block store, then call `start()`. Construction has no side effects; `start()` registers the `/ipfs/bitswap/1.2.0` protocol handler and subscribes to the host's event bus for peer connect/disconnect events.
 
 ```dart
-import 'package:dart_libp2p_bitswap/dart_libp2p_bitswap.dart';
-import 'package:dart_libp2p/dart_libp2p.dart' as libp2p; // Assuming this is your libp2p import
-
-// Assuming 'host' is your initialized and started libp2p.Host instance
-// libp2p.Host host = ...; 
-// await host.start();
-
-// You need to obtain the peer connectedness event stream from your host.
-// The exact way to get this stream depends on your libp2p.Host implementation.
-// For example, it might be:
-// Stream<libp2p.EvtPeerConnectednessChanged> peerEvents = host.eventBus.subscribe(libp2p.EvtPeerConnectednessChanged).stream;
-// Or if your host provides it directly:
-// Stream<libp2p.EvtPeerConnectednessChanged> peerEvents = host.getPeerEventsStream(); // Placeholder
-
-// For this example, let's assume you have a StreamController for it:
-final peerConnectednessController = StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
-// In a real app, this controller would be fed by actual peer connection events from the libp2p Host.
-
-final myBlockStore = MyBlockStore();
+// 'host' is your initialized and started libp2p.Host
 final bitswap = Bitswap(
-  host: host, 
-  blockStore: myBlockStore,
-  peerEventsStream: peerConnectednessController.stream, // Provide the stream
+  host: host,
+  blockStore: MyBlockStore(),
+  options: const BitswapOptions(getBlockTimeout: Duration(seconds: 30)), // optional
 );
-
-print('Bitswap service initialized.');
-
-// Don't forget to close the controller when done if you created it
-// await peerConnectednessController.close(); 
+await bitswap.start();
 ```
 
-### 3. Requesting Blocks (Wanting Blocks)
+### 3. Fetching blocks
 
-To request blocks from the network, use the `wantBlocks` method.
+`getBlock` returns a block from the local store if present, otherwise wants it from connected Bitswap peers and waits for it. It returns `null` if the block does not arrive within the timeout or its want is cancelled.
 
 ```dart
-import 'package:dart_cid/dart_cid.dart' as dart_cid;
+final cid = dart_cid.CID.fromString('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq');
 
-// Example CIDs you want to fetch
-final cid1 = dart_cid.CID.fromString('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'); // Replace with actual CIDs, using fromString
-// final cid2 = dart_cid.CID.fromString('...'); // Using fromString
+final data = await bitswap.getBlock(cid, timeout: const Duration(seconds: 10));
+if (data == null) print('Block not found in time');
+```
 
-await bitswap.wantBlocks([cid1 /*, cid2 */]);
-print('Requested CIDs: ${cid1.toString()}');
+To prefetch without waiting, use `wantBlocks`; received blocks are written to your `BlockStore`. Only blocks on the wantlist are accepted — unsolicited blocks are discarded. To stop wanting blocks, call `cancelWants`, which also sends `CANCEL` to the peers that were asked:
 
-// Bitswap will now attempt to find peers with these blocks and retrieve them.
-// Received blocks will be put into your IBlockStore via the `put` method.
+```dart
+await bitswap.wantBlocks([cid1, cid2]);
+// ...
+bitswap.cancelWants([cid2]);
 ```
 
 ### 4. Providing Blocks
 
-When other peers request blocks that are present in your `IBlockStore` (checked via the `has` and `get` methods), the Bitswap service will automatically send them. Ensure your `IBlockStore.put` method correctly stores blocks that your node wishes to share.
+When peers request blocks present in your `BlockStore` (checked via `has` and `get`), Bitswap sends them automatically, split into messages of at most 4 MiB. Peers that send `WANT_HAVE` receive a `HAVE` presence rather than the block.
 
 ### 5. Stopping Bitswap
 
-When your application is shutting down, or you no longer need the Bitswap service, call the `stop` method to clean up resources, such as unregistering protocol handlers and closing active streams.
+Call `stop()` when done. It unregisters the protocol handler, closes all streams, and fails any pending `getBlock` calls with a `StateError`. A stopped instance cannot be restarted.
 
 ```dart
 await bitswap.stop();
 print('Bitswap service stopped.');
 ```
 
-### Example
+### 6. Logging
 
-A more detailed, runnable example can be found in the `/example` directory of this package. It includes a placeholder for libp2p host setup.
+The library logs through [`package:logging`](https://pub.dev/packages/logging) and prints nothing by default. Loggers are `bitswap`, `bitswap.network` and `bitswap.wantmanager`; problems are logged at `WARNING`, protocol activity at `FINE`, and per-chunk stream I/O at `FINEST`.
 
 ```dart
-// (Simplified snippet from example/dart_libp2p_bitswap_example.dart)
+import 'package:logging/logging.dart';
 
-// ... (Host and BlockStore setup as above) ...
-
-// Bitswap bitswap = Bitswap(host: host, blockStore: blockStore);
-
-// final exampleData = Uint8List.fromList('Hello Bitswap!'.codeUnits);
-// final exampleCid = dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', exampleData); // Example of creating CID from data
-// await myBlockStore.put(exampleCid, exampleData);
-
-// final cidToWant = dart_cid.CID.fromString('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'); // Using fromString
-// await bitswap.wantBlocks([cidToWant]);
-
-// ... (await bitswap.stop()) ...
+hierarchicalLoggingEnabled = true;
+Logger('bitswap').level = Level.FINE;
+Logger('bitswap').onRecord.listen((r) => print('${r.level.name} ${r.loggerName}: ${r.message}'));
 ```
+
+### Example
+
+`example/dart_libp2p_bitswap_example.dart` shows a `BlockStore` implementation; host setup there is still a placeholder.
 
 ## Key Components
 
 *   **`Bitswap`**: The main public class for interacting with the Bitswap service.
-*   **`IBlockStore`**: An interface you must implement to provide block storage capabilities to the Bitswap service.
-*   **`BitswapNetworkService`**: (Internal) Handles the libp2p stream and message framing logic.
-*   **`WantManager`**: (Internal) Manages local and peer wantlists.
+*   **`BlockStore`**: An interface you must implement to provide block storage capabilities to the Bitswap service.
+*   **`BitswapOptions`**: Tunables such as the default `getBlock` timeout.
+*   **`BitswapClient`** (`lib/src/client/`): (Internal) Fetching — our `LocalWantlist`, broadcasting wants, accepting blocks and presences.
+*   **`BitswapServer`** (`lib/src/server/`): (Internal) Serving — the per-peer `PeerLedger`, answering wantlists, size-limited response packing.
+*   **`BitswapNetworkService`** (`lib/src/network/`): (Internal) Stream handling, varint framing, and the ordered per-peer send queue.
 *   **Protobuf Messages**: The package exports the generated Dart classes for Bitswap messages (e.g., `Message`, `Wantlist`, `Block`) from `src/proto/bitswap_message.pb.dart`.
 
 ## Protocol Details
@@ -190,7 +155,8 @@ This library implements version **1.2.0** of the Bitswap protocol, identified by
 *   `Block` and `Have` want types.
 *   `sendDontHave` requests.
 *   `HAVE` / `DONT_HAVE` block presence messages.
-*   CIDv1 support via `prefix` and `data` in block payloads.
+*   CIDv0 and CIDv1 blocks via `prefix` and `data` in block payloads (sha2-256 and sha2-512).
+*   4 MiB message size limit, matching go-bitswap / boxo.
 
 For full specification details, please refer to the [official Bitswap spec](https://github.com/ipfs/specs/blob/master/bitswap/README.md).
 You can also find a copy of the spec used during development in `bitswap_spec.txt` within this repository.

@@ -1,557 +1,141 @@
-import 'dart:async'; // Added for StreamSubscription
+import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:dart_libp2p/dart_libp2p.dart' as libp2p; // Assuming this is the corrected import
-import 'package:dcid/dcid.dart' as dart_cid; // Using alias for clarity with CID class
-import 'package:dart_multihash/dart_multihash.dart' as dart_multihash;
-import 'package:crypto/crypto.dart' as crypto;
+import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
+import 'package:dcid/dcid.dart' as dart_cid;
+import 'package:logging/logging.dart';
+import 'package:meta/meta.dart';
 
+import './block_store.dart';
+import './client/client.dart';
+import './network/network_service.dart';
 import './proto/bitswap_message.pb.dart' as pb;
-import './want_manager.dart';
-import './network_service.dart';
-import 'package:convert/convert.dart'; // For hex encoding in logs
+import './server/engine.dart';
 
-// Interface for a block store
-abstract class IBlockStore {
-  Future<bool> has(dart_cid.CID cid);
-  Future<Uint8List?> get(dart_cid.CID cid);
-  Future<void> put(dart_cid.CID cid, Uint8List data);
-}
+export './block_store.dart';
 
+final _log = Logger('bitswap');
+
+/// A Bitswap 1.2.0 node: fetches blocks from peers and serves blocks from a
+/// [BlockStore]. Call [start] before use and [stop] when done.
+///
+/// This is a facade over [BitswapClient] (fetching) and [BitswapServer]
+/// (serving), which share one [BitswapNetworkService].
 class Bitswap {
-  // Helper to keep track of peers known to support Bitswap.
-  // This could be populated when streams are initiated or messages are received.
-  // For simplicity, not fully managed here yet.
-  final Set<String> _activeBitswapPeers = {}; 
   final libp2p.Host _host;
-  final IBlockStore _blockStore;
-  late final WantManager _wantManager;
-  late final BitswapNetworkService _networkService;
-  // Using dynamic for the subscription type as the event type from bus might be generic
-  StreamSubscription<dynamic>? _connectednessChangeSubscription;
+  final BitswapOptions options;
+  late final BitswapNetworkService _network;
+  late final BitswapClient _client;
+  late final BitswapServer _server;
+  libp2p.Subscription<dynamic>? _peerEvents;
+  StreamSubscription<dynamic>? _peerEventsListener;
+  bool _started = false;
+  bool _stopped = false;
 
+  /// Creates a Bitswap node for [host]. Has no side effects until [start].
   Bitswap({
     required libp2p.Host host,
-    required IBlockStore blockStore,
-    required Stream<dynamic> peerEventsStream, // Added stream parameter
-  })  : _host = host,
-        _blockStore = blockStore {
-    _wantManager = WantManager();
-    _networkService = BitswapNetworkService(_host, handleIncomingMessage); // Updated method name
-    _networkService.start(); // Start listening for network messages
-    print('// BSW_LOG: Bitswap constructor: Network service started.');
-
-    // Listen to the provided stream for peer connectedness changes
-    try {
-      _connectednessChangeSubscription = peerEventsStream.listen((event) {
-        // The stream is already typed, so direct access should be fine.
-        // No need for 'if (event is libp2p.EvtPeerConnectednessChanged)' if stream is correctly typed.
-        if (event is libp2p.EvtPeerConnectednessChanged) {
-          if (event.connectedness == libp2p.Connectedness.notConnected) {
-            print('// BSW_LOG: Peer connectedness changed: ${event.peer.toString()} is NOT CONNECTED.');
-            onPeerDisconnected(event.peer); // Updated method name
-          } else if (event.connectedness == libp2p.Connectedness.connected) {
-            // Handle peer connected if needed in the future
-            print('// BSW_LOG: Peer connectedness changed: ${event.peer.toString()} is CONNECTED.');
-            print('Bitswap: Peer connected: ${event.peer.toString()}');
-          }
-        }
-      });
-      print('// BSW_LOG: Bitswap: Listening to provided peer connectedness event stream.');
-      print('Bitswap: Listening to provided peer connectedness event stream.');
-    } catch (e) {
-      print('// BSW_LOG: Bitswap: Error listening to peer connectedness event stream: $e. Disconnection cleanup might not work.');
-      print('Bitswap: Error listening to peer connectedness event stream: $e. Disconnection cleanup might not work.');
-    }
-    print('// BSW_LOG: Bitswap instance created for host: ${_host.id.toBase58()}.');
-    print('Bitswap instance created and network service started.');
+    required BlockStore blockStore,
+    this.options = const BitswapOptions(),
+  }) : _host = host {
+    _network = BitswapNetworkService(host, handleIncomingMessage);
+    _server = BitswapServer(blockStore, _network);
+    _client = BitswapClient(host, blockStore, _network, options, _server.blockAvailable);
   }
 
+  /// Registers the Bitswap protocol handler and starts tracking peer
+  /// connections. Idempotent; a stopped instance cannot be restarted.
+  Future<void> start() async {
+    if (_stopped) throw StateError('Bitswap stopped');
+    if (_started) return;
+    _started = true;
+    await _network.start();
+
+    final subscription = _host.eventBus.subscribe(libp2p.EvtPeerConnectednessChanged);
+    _peerEvents = subscription;
+    _peerEventsListener = subscription.stream.listen(
+      (event) {
+        if (event is! libp2p.EvtPeerConnectednessChanged) return;
+        if (event.connectedness == libp2p.Connectedness.notConnected) {
+          onPeerDisconnected(event.peer);
+        } else if (event.connectedness == libp2p.Connectedness.connected) {
+          _onPeerConnected(event.peer);
+        }
+      },
+      onError: (Object e, StackTrace s) {
+        _log.warning('Error on peer connectedness event stream; disconnection cleanup may be missed', e, s);
+      },
+    );
+    _log.fine('Bitswap started for host: ${_host.id.toBase58()}.');
+  }
+
+  /// Stops Bitswap: unregisters the protocol handler, closes all streams and
+  /// fails any pending [getBlock] calls with a [StateError]. Idempotent.
   Future<void> stop() async {
-    print('// BSW_LOG: Bitswap stopping...');
-    print('Bitswap stopping...');
-    await _connectednessChangeSubscription?.cancel(); // Reverted to cancel()
-    await _networkService.stop();
-    print('Bitswap stopped.');
+    if (_stopped) return;
+    _stopped = true;
+    await _peerEventsListener?.cancel();
+    await _peerEvents?.close();
+    await _network.stop();
+    _client.stop(StateError('Bitswap stopped'));
+    _log.fine('Bitswap stopped.');
   }
-  
-  // Made package-private for testability. Ideally, use DI or other patterns.
-  void onPeerDisconnected(libp2p.PeerId peerId) {
-    final peerIdStr = peerId.toString();
-    print('// BSW_LOG: onPeerDisconnected: $peerIdStr');
-    print('Bitswap: Peer disconnected: $peerIdStr. Cleaning up...');
-    _activeBitswapPeers.remove(peerIdStr);
-    _wantManager.clearPeerWantlist(peerIdStr);
-    // Also, tell the network service to clean up any streams for this peer.
-    _networkService.handlePeerDisconnected(peerIdStr);
-    // TODO: Consider if local wants that were only being pursued with this peer need re-evaluation.
-  }
-
-  // This method will be passed to BitswapNetworkService
-  // Made package-private for testability. Ideally, use DI or other patterns.
-  void handleIncomingMessage(String peerId, pb.Message message) {
-    print('// BSW_LOG: handleIncomingMessage from $peerId. HasWantlist: ${message.hasWantlist()}, PayloadCount: ${message.payload.length}, PresenceCount: ${message.blockPresences.length}');
-    // Process wantlist entries
-    if (message.hasWantlist()) {
-      _handleWantlist(peerId, message.wantlist);
-    }
-
-    // Process received blocks
-    for (final block in message.payload) {
-      _handleReceivedBlock(peerId, block);
-    }
-
-    // Process block presences (HAVE/DONT_HAVE)
-    for (final presence in message.blockPresences) {
-      _handleBlockPresence(peerId, presence);
-    }
-
-    // Handle pending bytes (informational for now)
-    if (message.hasPendingBytes()) {
-      print('Peer $peerId has ${message.pendingBytes} pending bytes for us.');
-    }
-  }
-
-  void _handleWantlist(String peerId, pb.Message_Wantlist wantlist) async {
-    print('// BSW_LOG: _handleWantlist from $peerId. Entries: ${wantlist.entries.length}, Full: ${wantlist.full}');
-    print('Received wantlist from $peerId: ${wantlist.entries.length} entries, full: ${wantlist.full}');
-    
-    // When we successfully handle a message from a peer, consider them an active Bitswap peer.
-    _activeBitswapPeers.add(peerId);
-    print('// BSW_LOG: _handleWantlist: Added $peerId to active Bitswap peers.');
-
-    if (wantlist.full) {
-      print('// BSW_LOG: _handleWantlist: Received full wantlist from $peerId. Clearing existing wants for this peer.');
-      print('Received full wantlist from $peerId. Clearing existing wants for this peer.');
-      // Assuming WantManager has a method to clear all wants for a specific peer.
-      // This method will need to be implemented in WantManager if it doesn't exist.
-      _wantManager.clearPeerWantlist(peerId); 
-    }
-
-    for (final entry in wantlist.entries) {
-      dart_cid.CID cid; 
-      try {
-        cid = dart_cid.CID.fromBytes(Uint8List.fromList(entry.block));
-      } catch (e) {
-        print('// BSW_LOG: _handleWantlist: Error parsing CID from wantlist entry from $peerId: $e. Entry: ${entry.toDebugString()}');
-        print('Error parsing CID from wantlist entry from $peerId: $e');
-        continue; // Skip this invalid entry
-      }
-
-      print('// BSW_LOG: _handleWantlist: Processing entry for CID $cid from $peerId. Cancel: ${entry.cancel}, WantType: ${entry.wantType}, Priority: ${entry.priority}, SendDontHave: ${entry.sendDontHave}');
-      if (entry.cancel) {
-        print('// BSW_LOG: _handleWantlist: Peer $peerId cancelled want for CID $cid');
-        print('Peer $peerId cancelled want for CID $cid');
-        _wantManager.removePeerWant(peerId, cid);
-        // TODO: Stop any in-progress sending efforts for this block to this peer
-      } else {
-        print('// BSW_LOG: _handleWantlist: Peer $peerId wants CID $cid, type: ${entry.wantType}, priority: ${entry.priority}, sendDontHave: ${entry.sendDontHave}');
-        print('Peer $peerId wants CID $cid, type: ${entry.wantType}, priority: ${entry.priority}, sendDontHave: ${entry.sendDontHave}');
-        _wantManager.addPeerWant(
-          peerId,
-          cid,
-          priority: entry.priority,
-          wantType: entry.wantType,
-          sendDontHave: entry.sendDontHave,
-        );
-
-        // Respond to the want
-        bool hasBlock = await _blockStore.has(cid);
-        print('// BSW_LOG: _handleWantlist: Checked blockStore for $cid. HasBlock: $hasBlock');
-
-        if (entry.wantType == pb.Message_Wantlist_WantType.Block) {
-          if (hasBlock) {
-            final blockData = await _blockStore.get(cid);
-            print('// BSW_LOG: _handleWantlist: Retrieved block $cid from blockStore. Data length: ${blockData?.length}');
-            if (blockData != null) {
-              // final prefix = [cid.codec, codecNameToCode[cid.codecName]];
-              BytesBuilder prefixBuilder = BytesBuilder() ;
-              // Construct prefix as per dart-cid's CID.toBytes() for CIDv1 (version, codec, multihash_code, multihash_len)
-              // This assumes the user's previous fix for cid.prefix was to provide these components.
-              // The `blockProto.prefix` should be version, codec, multihash_type_code, multihash_digest_length
-              // This part needs to align with how `blockProto.prefix` is defined by Bitswap spec.
-              // Spec: "CID prefix (all of the CID components except for the digest of the multihash)"
-              // This means: cidV1: [version][codec][mh_type][mh_len]
-              //             cidV0: empty or [mh_type=sha256][mh_len=32] (ambiguous in spec, but CIDv0 IS a multihash)
-              // For sending, we need to provide what the spec means by "prefix".
-              // Your previous code for constructing prefix was:
-              // prefix.add(hex.decode(cid.version.toRadixString(16)));
-              // prefix.add(hex.decode(cid.codec.toRadixString(16)));
-              // prefix.add(hex.decode(codecNameToCode[cid.codecName]?.toRadixString(16) ?? '00'));
-              // This seems to be constructing [version][codec][multihash_type_code] if codecNameToCode maps to mh_type.
-              // This is NOT the full CID prefix as per Bitswap spec if it needs mh_len.
-              // Let's assume for now your `Cid` object's `cid.toBytes()` gives the full CID,
-              // and `cid.multihash` gives the full multihash.
-              // The `blockProto.prefix` should be the CID bytes *excluding* the digest part of the multihash.
-
-              // Re-evaluating: The `prefix` field in `pb.Message_Block` is for the *sender* to provide.
-              // The sender (our node) should construct this prefix correctly.
-              // Your previous logic for constructing `prefix.toBytes()` was:
-              //   version_bytes + codec_bytes + multihash_type_code_bytes
-              // This seems like a plausible interpretation of "CID components except for the digest".
-              // Let's stick to your existing logic for constructing the prefix to send.
-              prefixBuilder.add(dart_cid.encodeVarint(cid.version)); 
-              prefixBuilder.add(dart_cid.encodeVarint(cid.codec));
-              
-              final decodedMh = dart_multihash.Multihash.decode(cid.multihash);
-              prefixBuilder.add(dart_cid.encodeVarint(decodedMh.code));
-              prefixBuilder.add(dart_cid.encodeVarint(decodedMh.digest.length)); // Use digest.length for the length of the digest
-
-              final blockProto = pb.Message_Block()
-                ..prefix = prefixBuilder.toBytes()
-                ..data = blockData;
-              final responseMessage = pb.Message()..payload.add(blockProto);
-              print('// BSW_LOG: _handleWantlist: Sending block $cid to $peerId');
-              print('Sending block $cid to $peerId');
-              _networkService.sendMessage(peerId, responseMessage);
-            }
-          } else if (entry.sendDontHave) {
-            final presenceProto = pb.Message_BlockPresence()
-              ..cid = cid.toBytes()
-              ..type = pb.Message_BlockPresenceType.DontHave;
-            final responseMessage = pb.Message()..blockPresences.add(presenceProto);
-            print('// BSW_LOG: _handleWantlist: Sending DONT_HAVE for $cid to $peerId (block not found, sendDontHave true)');
-            print('Sending DONT_HAVE for $cid to $peerId');
-            _networkService.sendMessage(peerId, responseMessage);
-          }
-        } else if (entry.wantType == pb.Message_Wantlist_WantType.Have) {
-          if (hasBlock) {
-            final presenceProto = pb.Message_BlockPresence()
-              ..cid = cid.toBytes()
-              ..type = pb.Message_BlockPresenceType.Have;
-            final responseMessage = pb.Message()..blockPresences.add(presenceProto);
-            print('// BSW_LOG: _handleWantlist: Sending HAVE for $cid to $peerId');
-            print('Sending HAVE for $cid to $peerId');
-            _networkService.sendMessage(peerId, responseMessage);
-          } else if (entry.sendDontHave) {
-            final presenceProto = pb.Message_BlockPresence()
-              ..cid = cid.toBytes()
-              ..type = pb.Message_BlockPresenceType.DontHave;
-            final responseMessage = pb.Message()..blockPresences.add(presenceProto);
-            print('// BSW_LOG: _handleWantlist: Sending DONT_HAVE for $cid to $peerId (HAVE type, block not found, sendDontHave true)');
-            print('Sending DONT_HAVE for $cid to $peerId');
-            _networkService.sendMessage(peerId, responseMessage);
-          }
-        }
-      }
-    }
-  }
-
-  void _handleReceivedBlock(String peerId, pb.Message_Block blockProto) async {
-    print('// BSW_LOG: _handleReceivedBlock from $peerId. Prefix hex: ${hex.encode(blockProto.prefix)}, Data length: ${blockProto.data.length}.');
-    print('Received block from $peerId. Prefix length: ${blockProto.prefix.length}, Data length: ${blockProto.data.length}.');
-
-    final Uint8List prefixBytes = Uint8List.fromList(blockProto.prefix);
-    final Uint8List dataBytes = Uint8List.fromList(blockProto.data);
-
-    dart_cid.CID? receivedCid;
-
-    try {
-      // Step 1: Parse `prefixBytes` to get CID version, codec, and multihash type code + digest length.
-      // The prefix for CIDv1 is: [version][codec][mh_type][mh_len_of_digest]
-      // The prefix for CIDv0 is effectively empty or just [mh_type=sha256][mh_len=32]
-      // as CIDv0 itself is a multihash.
-      
-      int offset = 0;
-      final versionEntry = dart_cid.decodeVarint(prefixBytes, offset);
-      int cidVersion = versionEntry.key;
-      offset += versionEntry.value;
-
-      int cidCodec;
-      int multihashCode;
-      int digestLength; // Length of the digest that was hashed from data, not length of mh itself
-
-      if (cidVersion == dart_cid.CID.V1) {
-        final codecEntry = dart_cid.decodeVarint(prefixBytes, offset);
-        cidCodec = codecEntry.key;
-        offset += codecEntry.value;
-
-        final mhCodeEntry = dart_cid.decodeVarint(prefixBytes, offset);
-        multihashCode = mhCodeEntry.key;
-        offset += mhCodeEntry.value;
-
-        final mhLenEntry = dart_cid.decodeVarint(prefixBytes, offset);
-        digestLength = mhLenEntry.key;
-        offset += mhLenEntry.value;
-
-        if (offset != prefixBytes.length) {
-          print('WARN: CIDv1 prefix bytes length mismatch after parsing. Expected $offset, got ${prefixBytes.length}');
-          // This might indicate an issue or a non-standard prefix.
-        }
-      } else if (cidVersion == dart_cid.CID.V0) {
-        // For CIDv0, the prefix sent by another Bitswap node might be ambiguous.
-        // If it's a full CIDv0 multihash, it would be [0x12, 0x20, ...digest...].
-        // If `blockProto.prefix` is just the mh_type and mh_len for a CIDv0:
-        if (prefixBytes.length >= 2) { // Assuming at least type and len
-            // For CIDv0, prefix from sender might be just mh_type and mh_len
-            // Or it could be an attempt to send the full CIDv0 multihash as prefix if data is empty (not typical)
-            // Let's assume prefix contains mh_type and mh_len for CIDv0 if version is 0.
-            final mhCodeEntryV0 = dart_cid.decodeVarint(prefixBytes, offset);
-            multihashCode = mhCodeEntryV0.key;
-            offset += mhCodeEntryV0.value;
-
-            final mhLenEntryV0 = dart_cid.decodeVarint(prefixBytes, offset);
-            digestLength = mhLenEntryV0.key;
-            offset += mhLenEntryV0.value;
-            
-            cidCodec = dart_cid.codecNameToCode['dag-pb']!; // CIDv0 is implicitly dag-pb
-            
-            // Validate for CIDv0 (sha2-256, 32-byte digest)
-            if (multihashCode != dart_cid.codecNameToCode['sha2-256'] || digestLength != 32) {
-                 print('WARN: Received CIDv0 prefix components (mhCode: $multihashCode, digestLen: $digestLength) do not conform to sha2-256 32-byte digest.');
-                 return; // Cannot reliably reconstruct
-            }
-        } else {
-            print('ERROR: Received CIDv0 prefix is too short. Prefix: ${hex.encode(prefixBytes)}');
-            return;
-        }
-      } else {
-        print('ERROR: Unknown CID version $cidVersion parsed from prefix.');
-        return;
-      }
-
-      // Step 2: Compute the multihash digest of `dataBytes`.
-      Uint8List digest;
-      String? multihashName = dart_cid.codecCodeToName[multihashCode];
-      
-      if (multihashName == null) {
-        print('ERROR: Unknown multihash code $multihashCode from prefix. Cannot determine hash algorithm.');
-        return;
-      }
-
-      if (multihashName == 'sha2-256') {
-        digest = Uint8List.fromList(crypto.sha256.convert(dataBytes).bytes);
-      } else if (multihashName == 'sha2-512') {
-        digest = Uint8List.fromList(crypto.sha512.convert(dataBytes).bytes);
-      } else {
-        print('ERROR: Unsupported multihash type code $multihashCode ($multihashName) for hashing received block data.');
-        return;
-      }
-
-      if (digest.length != digestLength) {
-        print('ERROR: Computed digest length ${digest.length} does not match digest length from prefix $digestLength.');
-        return;
-      }
-
-      // Step 3: Construct the full Multihash (code + length_of_digest + digest)
-      final fullMultihashBytes = dart_multihash.Multihash.encode(multihashName, digest).toBytes();
-      
-      // Step 4: Construct the full `CID` object.
-      receivedCid = dart_cid.CID(cidVersion, cidCodec, fullMultihashBytes);
-
-      print('// BSW_LOG: _handleReceivedBlock: Successfully reconstructed CID: $receivedCid from $peerId.');
-      print('Successfully reconstructed CID: $receivedCid from $peerId.');
-
-      if (_wantManager.isWantingLocally(receivedCid)) { 
-        print('// BSW_LOG: _handleReceivedBlock: CID $receivedCid was wanted. Storing block.');
-        await _blockStore.put(receivedCid, dataBytes);
-        _wantManager.blockReceived(receivedCid, dataBytes); 
-        print('// BSW_LOG: _handleReceivedBlock: Stored block $receivedCid from $peerId and notified WantManager.');
-        print('Stored block $receivedCid from $peerId');
-        
-        _sendCancelMessages(receivedCid);
-      } else {
-        print('// BSW_LOG: _handleReceivedBlock: Received unsolicited block $receivedCid from $peerId. Prefix: ${hex.encode(prefixBytes)}');
-        print('Received unsolicited block $receivedCid from $peerId. Prefix: ${hex.encode(prefixBytes)}');
-      }
-    } catch (e) {
-      print('// BSW_LOG: _handleReceivedBlock: Error processing received block from $peerId: $e. Prefix: ${hex.encode(prefixBytes)}, DataLen: ${dataBytes.length}');
-      print('Error processing received block from $peerId: $e. Prefix: ${hex.encode(prefixBytes)}, DataLen: ${dataBytes.length}');
-    }
-  }
-
-  void _handleBlockPresence(String peerId, pb.Message_BlockPresence presence) {
-    try {
-      final cid = dart_cid.CID.fromBytes(Uint8List.fromList(presence.cid)); 
-      print('// BSW_LOG: _handleBlockPresence from $peerId for CID $cid: ${presence.type}');
-      _activeBitswapPeers.add(peerId);
-      print('Received block presence from $peerId for CID $cid: ${presence.type}');
-      if (presence.type == pb.Message_BlockPresenceType.Have) {
-        _wantManager.receivedHave(peerId, cid);
-      } else if (presence.type == pb.Message_BlockPresenceType.DontHave) {
-        _wantManager.receivedDontHave(peerId, cid);
-      }
-    } catch (e) {
-      print('// BSW_LOG: _handleBlockPresence: Error parsing CID from block presence from $peerId: $e');
-      print('Error parsing CID from block presence from $peerId: $e');
-    }
-  }
-
-  // Method to request blocks from the network
-  Future<void> wantBlocks(List<dart_cid.CID> cidsToWant) async { 
-    print('// BSW_LOG: wantBlocks called with ${cidsToWant.length} CIDs: ${cidsToWant.map((c) => c.toString()).join(', ')}');
-    if (cidsToWant.isEmpty) return;
-
-    final wantlistEntries = <pb.Message_Wantlist_Entry>[];
-    for (final cid in cidsToWant) {
-      final entry = _wantManager.addLocalWant(cid); // Default priority, wantType=Block, sendDontHave=false
-      if (entry != null) { // Only add if it's a new want or type changed
-        wantlistEntries.add(pb.Message_Wantlist_Entry()
-          ..block = cid.toBytes()
-          ..wantType = pb.Message_Wantlist_WantType.Block // Or make configurable
-          // priority, sendDontHave can be added if needed
-        );
-      }
-    }
-    
-    if (wantlistEntries.isEmpty) {
-      print('// BSW_LOG: wantBlocks: No new wants to send after checking WantManager.');
-      print('No new wants to send.');
-      return;
-    }
-
-    final wantlistProto = pb.Message_Wantlist()..entries.addAll(wantlistEntries);
-    final message = pb.Message()..wantlist = wantlistProto;
-
-    print('// BSW_LOG: wantBlocks: Wanting ${wantlistEntries.length} blocks. Broadcasting wantlist.');
-    print('Wanting ${wantlistEntries.length} blocks. Broadcasting wantlist.');
-    
-    final List<String> bitswapPeers = await _getBitswapPeers(); // Added await
-    print('// BSW_LOG: wantBlocks: Peers to send wantlist to: $bitswapPeers');
-
-    if (bitswapPeers.isEmpty) {
-      print('// BSW_LOG: wantBlocks: No known Bitswap peers to send wantlist to.');
-      print('No known Bitswap peers to send wantlist to.');
-      // TODO: Potentially queue the wantlist or try discovery / connect to seed peers.
-    }
-
-    // If we are already connected to peers, send the wantlist immediately.
-    // Otherwise, the want is in the wantlist and will be sent when peers connect.
-    for (final peerId in bitswapPeers) {
-      print('// BSW_LOG: wantBlocks: Sending wantlist to peer $peerId for ${wantlistEntries.length} CIDs.');
-      print('Sending wantlist to peer $peerId for ${wantlistEntries.length} CIDs.');
-      _networkService.sendMessage(peerId, message);
-      // Record that we've sent these wants to this peer
-      for (final entryProto in wantlistEntries) {
-        // We need the CID object to record it in WantManager
-        // This assumes entryProto.block are valid CID bytes
-        try {
-            final cidForRecording = dart_cid.CID.fromBytes(Uint8List.fromList(entryProto.block));
-            _wantManager.recordWantSentToPeer(cidForRecording, peerId);
-        } catch (e) {
-            print('// BSW_LOG: wantBlocks: Error creating CID for recording sent want to $peerId: $e');
-            print('Error creating CID for recording sent want to $peerId: $e');
-        }
-      }
-    }
-  }
-
-  Future<List<String>> _getBitswapPeers() async { // Made async, returns Future
-    print('// BSW_LOG: _getBitswapPeers: Starting peer discovery.');
-    final Set<String> peers = {}; // Use a set to avoid duplicates
-
-    // Prioritize already known active Bitswap peers
-    peers.addAll(_activeBitswapPeers);
-    print('// BSW_LOG: _getBitswapPeers: Initial active peers: $_activeBitswapPeers');
-
-    // Discover other connected peers supporting Bitswap
-    // Assumes dart_libp2p Host API:
-    // - _host.connections() (or similar) returns Iterable<libp2p.Connection>
-    // - connection.remotePeer returns libp2p.PeerId
-    // - _host.peerStore.getPeer(peerId) should return a PeerInfo-like object.
-    // - PeerInfo object should have a `protocols` getter (Set<String>).
-    try {
-      // This assumes _host.connectionManager.activeConnections returns an Iterable.
-      // And conn.remotePeer is a PeerId object.
-      // And _host.peerStore.getPeer(PeerId) returns a Future<PeerInfo?>.
-      final connections = _host.network.conns;
-      print('// BSW_LOG: _getBitswapPeers: Found ${connections.length} connections from host.network.conns.');
-      for (final conn in connections) {
-        final remotePeerId = conn.remotePeer; // This should be a libp2p.PeerId
-        print('// BSW_LOG: _getBitswapPeers: Checking connection to ${remotePeerId.toBase58()}');
-        final peerInfo = await _host.peerStore.getPeer(remotePeerId); // Added await
-        
-        if (peerInfo != null && peerInfo.protocols.contains(_networkService.protocolId)) {
-          peers.add(remotePeerId.toBase58()); // Use toBase58() instead of toString()
-          print('// BSW_LOG: _getBitswapPeers: Peer ${remotePeerId.toBase58()} supports Bitswap. Protocols: ${peerInfo.protocols}');
-        } else {
-          print('// BSW_LOG: _getBitswapPeers: Peer ${remotePeerId.toBase58()} does NOT support Bitswap or peerInfo is null. PeerInfo: ${peerInfo}, Protocols: ${peerInfo?.protocols}');
-        }
-      }
-    } catch (e) {
-      print('// BSW_LOG: _getBitswapPeers: Error querying connected peers for Bitswap support: $e. Falling back to known active peers.');
-      print('Error querying connected peers for Bitswap support: $e. Falling back to known active peers.');
-      // If there's an error (e.g., API assumptions are wrong),
-      // we rely on the initially added _activeBitswapPeers.
-      // If _activeBitswapPeers was empty, peers will remain empty or contain only those from _activeBitswapPeers.
-    }
-
-    if (peers.isEmpty && _activeBitswapPeers.isEmpty) { // Adjusted condition to avoid warning if _activeBitswapPeers had content
-      print('// BSW_LOG: _getBitswapPeers: WARN: Found no Bitswap-supporting peers after checking active and connected peers.');
-      print('WARN: _getBitswapPeers() found no Bitswap-supporting peers after checking active and connected peers.');
-    }
-    print('// BSW_LOG: _getBitswapPeers: Final list of Bitswap peers: ${peers.toList()}');
-    return peers.toList();
-  }
-
-  void _sendCancelMessages(dart_cid.CID cid) { 
-    print('// BSW_LOG: _sendCancelMessages for CID $cid');
-    // Construct a CANCEL message
-    final cancelEntry = pb.Message_Wantlist_Entry()
-      ..block = cid.toBytes()
-      ..cancel = true;
-    final cancelWantlist = pb.Message_Wantlist()..entries.add(cancelEntry);
-    final cancelMessage = pb.Message()..wantlist = cancelWantlist;
-
-    final Set<String> peersToCancel = _wantManager.getPeersSentWantForCid(cid);
-    print('// BSW_LOG: _sendCancelMessages: Peers to send CANCEL to for $cid: $peersToCancel');
-
-    if (peersToCancel.isEmpty) {
-      print('// BSW_LOG: _sendCancelMessages: No peers to send CANCEL for CID $cid.');
-      print('No peers to send CANCEL for CID $cid.');
-      return;
-    }
-
-    for (final peerId in peersToCancel) {
-      print('// BSW_LOG: _sendCancelMessages: Sending CANCEL for CID $cid to peer $peerId');
-      print('Sending CANCEL for CID $cid to peer $peerId');
-      _networkService.sendMessage(peerId, cancelMessage);
-    }
-  }
-
-  // TODO: Add methods for handling peer connections/disconnections for wantlist cleanup etc.
-  // For example, when a peer disconnects, their wants in _peerWantlists should be cleared.
-  // Also, if we disconnect from a peer, we might need to re-evaluate our local wants.
 
   /// Retrieves a block by its CID.
   ///
-  /// This method will first check the local block store. If the block is not found,
-  /// it will add the CID to the wantlist and attempt to fetch it from the network.
-  /// It returns a Future that completes with the block data (Uint8List) when available,
-  /// or null if the block cannot be retrieved (e.g., not found after timeout - timeout not yet implemented).
-  Future<Uint8List?> getBlock(dart_cid.CID cid) async {
-    print('// BSW_LOG: getBlock called for CID $cid');
-    // 1. Check local store first
-    if (await _blockStore.has(cid)) {
-      print('// BSW_LOG: getBlock: Block $cid found in local store.');
-      print('Block $cid found in local store.');
-      return _blockStore.get(cid);
-    }
+  /// Returns the block from the local block store if present; otherwise wants
+  /// it from the network and waits up to [timeout] (default
+  /// [BitswapOptions.getBlockTimeout]) for it to arrive. Returns null if the
+  /// block did not arrive in time or its want was cancelled via [cancelWants].
+  /// Concurrent calls for the same CID share one want, which is cancelled
+  /// with peers once the last caller stops waiting without receiving it.
+  Future<Uint8List?> getBlock(dart_cid.CID cid, {Duration? timeout}) async {
+    _checkRunning();
+    return _client.getBlock(cid, timeout: timeout);
+  }
 
-    print('// BSW_LOG: getBlock: Block $cid not in local store. Adding to wantlist and attempting to fetch.');
-    print('Block $cid not in local store. Adding to wantlist and attempting to fetch.');
-    // 2. Add to wantlist (this ensures a Completer is ready in WantManager)
-    // wantBlocks will call addLocalWant internally.
-    // We call wantBlocks to ensure the want is broadcast if necessary.
-    await wantBlocks([cid]);
-    print('// BSW_LOG: getBlock: Called wantBlocks for $cid. Now waiting on whenBlockReceived.');
+  /// Adds [cids] to the wantlist and broadcasts them. Blocks are stored in
+  /// the [BlockStore] as they arrive; use [getBlock] to await one.
+  Future<void> wantBlocks(List<dart_cid.CID> cids) async {
+    _checkRunning();
+    await _client.wantBlocks(cids);
+  }
 
-    // 3. Get the future from WantManager that will complete when the block is received.
-    // This relies on wantBlocks having successfully added the want to the _wantManager.
-    try {
-      // Add a timeout to prevent waiting indefinitely
-      // TODO: Make timeout configurable
-      return await _wantManager.whenBlockReceived(cid).timeout(const Duration(seconds: 30));
-    } on TimeoutException {
-      print('// BSW_LOG: getBlock: Timeout waiting for block $cid');
-      print('Timeout waiting for block $cid');
-      _wantManager.removeLocalWant(cid); // Clean up the want if it timed out
-      return null;
-    } catch (e) {
-      print('// BSW_LOG: getBlock: Error while waiting for block $cid: $e');
-      print('Error while waiting for block $cid: $e');
-      _wantManager.removeLocalWant(cid); // Clean up
-      return null;
+  /// Removes [cids] from the wantlist and sends CANCEL to the peers that were
+  /// asked. Pending [getBlock] calls for them complete with null.
+  void cancelWants(List<dart_cid.CID> cids) => _client.cancelWants(cids);
+
+  /// Entry point for decoded messages from [BitswapNetworkService].
+  @visibleForTesting
+  Future<void> handleIncomingMessage(libp2p.PeerId peerId, pb.Message message) async {
+    if (_stopped) return;
+    if (message.hasWantlist()) {
+      _client.peerActive(peerId);
+      await _server.handleWantlist(peerId, message.wantlist);
     }
+    for (final block in message.payload) {
+      await _client.handleBlock(peerId, block);
+    }
+    for (final presence in message.blockPresences) {
+      _client.handlePresence(peerId, presence);
+    }
+  }
+
+  @visibleForTesting
+  void onPeerDisconnected(libp2p.PeerId peerId) {
+    _log.fine('Peer disconnected: $peerId. Cleaning up.');
+    _client.peerDisconnected(peerId);
+    _server.peerDisconnected(peerId);
+    _network.handlePeerDisconnected(peerId);
+  }
+
+  void _onPeerConnected(libp2p.PeerId peerId) {
+    _log.fine('Peer connected: $peerId');
+    _client.peerConnected(peerId);
+  }
+
+  void _checkRunning() {
+    if (_stopped) throw StateError('Bitswap stopped');
+    if (!_started) throw StateError('Bitswap not started; call start() first');
   }
 }

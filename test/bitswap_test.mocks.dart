@@ -291,11 +291,11 @@ class _FakePeerInfo_25 extends _i1.SmartFake implements _i2.PeerInfo {
         );
 }
 
-/// A class which mocks [IBlockStore].
+/// A class which mocks [BlockStore].
 ///
 /// See the documentation for Mockito's code generation for more information.
-class MockIBlockStore extends _i1.Mock implements _i4.IBlockStore {
-  MockIBlockStore() {
+class MockBlockStore extends _i1.Mock implements _i4.BlockStore {
+  MockBlockStore() {
     _i1.throwOnMissingStub(this);
   }
 

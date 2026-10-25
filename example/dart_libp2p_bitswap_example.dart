@@ -4,7 +4,7 @@ import 'package:dcid/dcid.dart' as dart_cid; // For CID
 import 'dart:typed_data';
 
 // A simple in-memory block store implementation for example purposes
-class InMemoryBlockStore implements IBlockStore {
+class InMemoryBlockStore implements BlockStore {
   final Map<String, Uint8List> _storage = {};
 
   @override
@@ -36,19 +36,20 @@ Future<void> main() async {
   // await host.start();
   // print('Libp2p Host started with PeerId: ${host.peerId}');
 
-  // 2. Implement IBlockStore
+  // 2. Implement BlockStore
   final blockStore = InMemoryBlockStore();
 
   // 3. Instantiate Bitswap
   // Ensure your host is properly initialized and started before this.
-  // Bitswap bitswap = Bitswap(host: host, blockStore: blockStore);
+  // final bitswap = Bitswap(host: host, blockStore: blockStore);
+  // await bitswap.start();
   // print('Bitswap service initialized.');
 
   // 4. Example: Adding a block to the local store
-  // final exampleData = Uint8List.fromList('Hello Bitswap!'.codeUnits);
-  // final exampleCid = await computeCid(exampleData); // You'd need a CID computation function
-  // await blockStore.put(exampleCid, exampleData);
-  // print('Added block ${exampleCid.toString()} to local store.');
+  final exampleData = Uint8List.fromList('Hello Bitswap!'.codeUnits);
+  final exampleCid = dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', exampleData);
+  await blockStore.put(exampleCid, exampleData);
+  print('Added block ${exampleCid.toString()} to local store.');
 
   // 5. Example: Wanting a block from the network
   // final cidToWant = dart_cid.CID.parse('bafkreibm6jg3ux5qumhcn2b3flc3tyu6dmlb4xa7u5bf44yegnrjhc4yeq'); // Example CID
@@ -66,24 +67,6 @@ Future<void> main() async {
   print('--------------------------------------------------------------------');
   print('NOTE: This example is a skeleton.');
   print('You need to replace placeholder Host setup with your actual libp2p Host initialization.');
-  print('You may also need a function to compute CIDs for data to use wantBlocks effectively.');
   print('Uncomment and adapt sections to test Bitswap functionality.');
   print('--------------------------------------------------------------------');
 }
-
-// Helper function to compute CID (example, replace with actual CID generation)
-/*
-Future<dart_cid.CID> computeCid(Uint8List data) async {
-  // This is a placeholder. Actual CID generation involves:
-  // 1. Choosing a multihash (e.g., sha2-256)
-  // 2. Hashing the data
-  // 3. Encoding the hash as a multihash (prefixing with hash code and length)
-  // 4. Choosing a CID version (e.g., v1)
-  // 5. Choosing a codec (e.g., dag-pb for raw data)
-  // 6. Combining version, codec, and multihash into a CID
-  // Example using dart_multihash and dart_cid (ensure these packages are in pubspec.yaml)
-  // final hash = crypto.sha256.convert(data);
-  // final mh = dart_multihash.Multihash.encode('sha2-256', Uint8List.fromList(hash.bytes));
-  // return dart_cid.CID(1, dart_cid.Codec.raw, mh.toBytes()); // Using 'raw' codec for raw bytes
-}
-*/

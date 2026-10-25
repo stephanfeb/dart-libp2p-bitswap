@@ -2,16 +2,13 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/dart_libp2p.dart'; // Avoid conflict if dart_libp2p exports them
-import 'package:dart_libp2p/p2p/discovery/peer_info.dart';
 // Assuming YamuxStream and related components are here or re-exported by a top-level yamux.dart
 // Adjust these paths if necessary based on your dart_libp2p package structure
-import 'package:dart_libp2p/core/network/conn.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/frame.dart';
 import 'package:dart_libp2p/p2p/transport/multiplexing/yamux/stream.dart';
 
 
 import 'package:dart_libp2p_bitswap/src/bitswap.dart';
-import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;
 import 'package:dcid/dcid.dart' as dart_cid;
 import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
 import 'package:test/test.dart';
@@ -20,7 +17,8 @@ import 'package:mockito/mockito.dart';
 // Import the existing mocks file. Ensure @GenerateMocks in bitswap_test.dart covers all needed mocks.
 // If not, this new file might need its own @GenerateMocks and build_runner execution.
 // For now, assuming bitswap_test.mocks.dart is sufficient and accessible.
-import 'bitswap_test.mocks.dart'; 
+import 'bitswap_test.mocks.dart';
+import 'test_helpers.dart';
 
 // If PeerInfo or TestEventSubscription are not in bitswap_test.mocks.dart because they were
 // part of a @GenerateMocks list specific to bitswap_test.dart's main(),
@@ -33,7 +31,7 @@ void main() {
   group('Two-Party WANT-BLOCK Exchange (Mocked Network) - Enhanced Test', () {
     late MockHost mockHostA, mockHostB;
     late PeerId peerIdA, peerIdB; // Changed from MockPeerId
-    late MockIBlockStore mockBlockStoreA, mockBlockStoreB;
+    late MockBlockStore mockBlockStoreA, mockBlockStoreB;
     late MockNetwork mockNetworkA, mockNetworkB;
     late MockPeerstore mockPeerStoreA, mockPeerStoreB;
     late StreamController<libp2p.EvtPeerConnectednessChanged> eventControllerA, eventControllerB;
@@ -48,12 +46,12 @@ void main() {
     // late List<Uint8List> dataWrittenToAtoB;
 
     // Yamux stream pairs
-    late YamuxStream b_to_a_clientEnd, b_to_a_serverEnd;
-    late YamuxStream a_to_b_clientEnd, a_to_b_serverEnd;
-    late StreamController<YamuxFrame> frames_b_to_a_out_controller; // Frames from b_to_a_clientEnd.sendFrame
-    late StreamController<YamuxFrame> frames_b_to_a_in_controller;  // Frames from b_to_a_serverEnd.sendFrame (e.g. window updates)
-    late StreamController<YamuxFrame> frames_a_to_b_out_controller; // Frames from a_to_b_clientEnd.sendFrame
-    late StreamController<YamuxFrame> frames_a_to_b_in_controller;  // Frames from a_to_b_serverEnd.sendFrame
+    late YamuxStream bToAClientEnd, bToAServerEnd;
+    late YamuxStream aToBClientEnd, aToBServerEnd;
+    late StreamController<YamuxFrame> framesBToAOut; // Frames from bToAClientEnd.sendFrame
+    late StreamController<YamuxFrame> framesBToAIn;  // Frames from bToAServerEnd.sendFrame (e.g. window updates)
+    late StreamController<YamuxFrame> framesAToBOut; // Frames from aToBClientEnd.sendFrame
+    late StreamController<YamuxFrame> framesAToBIn;  // Frames from aToBServerEnd.sendFrame
 
     setUp(() async {
       // dataWrittenToBtoA = []; // Not used directly anymore
@@ -61,10 +59,10 @@ void main() {
       streamHandlerA = null;
       streamHandlerB = null;
 
-      frames_b_to_a_out_controller = StreamController<YamuxFrame>.broadcast();
-      frames_b_to_a_in_controller = StreamController<YamuxFrame>.broadcast();
-      frames_a_to_b_out_controller = StreamController<YamuxFrame>.broadcast();
-      frames_a_to_b_in_controller = StreamController<YamuxFrame>.broadcast();
+      framesBToAOut = StreamController<YamuxFrame>.broadcast();
+      framesBToAIn = StreamController<YamuxFrame>.broadcast();
+      framesAToBOut = StreamController<YamuxFrame>.broadcast();
+      framesAToBIn = StreamController<YamuxFrame>.broadcast();
 
       // Create real PeerId instances
       // SHA256 hash (0x12) of length 32 (0x20)
@@ -75,7 +73,7 @@ void main() {
 
       // Node A setup
       mockHostA = MockHost();
-      mockBlockStoreA = MockIBlockStore();
+      mockBlockStoreA = MockBlockStore();
       mockNetworkA = MockNetwork();
       mockPeerStoreA = MockPeerstore();
       eventControllerA = StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
@@ -94,7 +92,7 @@ void main() {
 
       // Node B setup
       mockHostB = MockHost();
-      mockBlockStoreB = MockIBlockStore();
+      mockBlockStoreB = MockBlockStore();
       mockNetworkB = MockNetwork();
       mockPeerStoreB = MockPeerstore();
       eventControllerB = StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
@@ -112,66 +110,66 @@ void main() {
       });
 
       // Setup Yamux Stream Pairs
-      final mockConn_B_client = MockConn();
-      when(mockConn_B_client.localPeer).thenReturn(peerIdB);
-      when(mockConn_B_client.remotePeer).thenReturn(peerIdA);
-      when(mockConn_B_client.isClosed).thenReturn(false);
+      final mockConnBClient = MockConn();
+      when(mockConnBClient.localPeer).thenReturn(peerIdB);
+      when(mockConnBClient.remotePeer).thenReturn(peerIdA);
+      when(mockConnBClient.isClosed).thenReturn(false);
 
-      final mockConn_B_server = MockConn(); // A's view of the connection from B
-      when(mockConn_B_server.localPeer).thenReturn(peerIdA);
-      when(mockConn_B_server.remotePeer).thenReturn(peerIdB);
-      when(mockConn_B_server.isClosed).thenReturn(false);
+      final mockConnBServer = MockConn(); // A's view of the connection from B
+      when(mockConnBServer.localPeer).thenReturn(peerIdA);
+      when(mockConnBServer.remotePeer).thenReturn(peerIdB);
+      when(mockConnBServer.isClosed).thenReturn(false);
       
-      b_to_a_clientEnd = YamuxStream(
+      bToAClientEnd = YamuxStream(
           id: 1, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
           maxFrameSize: 16 * 1024,
-          sendFrame: (frame) async => frames_b_to_a_out_controller.add(frame),
-          parentConn: mockConn_B_client, logPrefix: "TestStream_BtoA_ClientEnd(1)");
-      b_to_a_serverEnd = YamuxStream(
+          sendFrame: (frame) async => framesBToAOut.add(frame),
+          parentConn: mockConnBClient, logPrefix: "TestStream_BtoA_ClientEnd(1)");
+      bToAServerEnd = YamuxStream(
           id: 1, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
           maxFrameSize: 16 * 1024,
-          sendFrame: (frame) async => frames_b_to_a_in_controller.add(frame),
-          parentConn: mockConn_B_server, logPrefix: "TestStream_BtoA_ServerEnd(1)");
+          sendFrame: (frame) async => framesBToAIn.add(frame),
+          parentConn: mockConnBServer, logPrefix: "TestStream_BtoA_ServerEnd(1)");
 
-      frames_b_to_a_out_controller.stream.listen((frame) => b_to_a_serverEnd.handleFrame(frame), 
-        onError: (e) => print("ERROR in frames_b_to_a_out_controller listener: $e"));
-      frames_b_to_a_in_controller.stream.listen((frame) => b_to_a_clientEnd.handleFrame(frame),
-        onError: (e) => print("ERROR in frames_b_to_a_in_controller listener: $e"));
+      framesBToAOut.stream.listen((frame) => bToAServerEnd.handleFrame(frame), 
+        onError: (e) => print("ERROR in framesBToAOut listener: $e"));
+      framesBToAIn.stream.listen((frame) => bToAClientEnd.handleFrame(frame),
+        onError: (e) => print("ERROR in framesBToAIn listener: $e"));
 
-      final mockConn_A_client = MockConn();
-      when(mockConn_A_client.localPeer).thenReturn(peerIdA);
-      when(mockConn_A_client.remotePeer).thenReturn(peerIdB);
-      when(mockConn_A_client.isClosed).thenReturn(false);
+      final mockConnAClient = MockConn();
+      when(mockConnAClient.localPeer).thenReturn(peerIdA);
+      when(mockConnAClient.remotePeer).thenReturn(peerIdB);
+      when(mockConnAClient.isClosed).thenReturn(false);
 
-      final mockConn_A_server = MockConn(); // B's view of the connection from A
-      when(mockConn_A_server.localPeer).thenReturn(peerIdB);
-      when(mockConn_A_server.remotePeer).thenReturn(peerIdA);
-      when(mockConn_A_server.isClosed).thenReturn(false);
+      final mockConnAServer = MockConn(); // B's view of the connection from A
+      when(mockConnAServer.localPeer).thenReturn(peerIdB);
+      when(mockConnAServer.remotePeer).thenReturn(peerIdA);
+      when(mockConnAServer.isClosed).thenReturn(false);
 
-      a_to_b_clientEnd = YamuxStream(
+      aToBClientEnd = YamuxStream(
           id: 2, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
           maxFrameSize: 16 * 1024,
-          sendFrame: (frame) async => frames_a_to_b_out_controller.add(frame),
-          parentConn: mockConn_A_client, logPrefix: "TestStream_AtoB_ClientEnd(2)");
-      a_to_b_serverEnd = YamuxStream(
+          sendFrame: (frame) async => framesAToBOut.add(frame),
+          parentConn: mockConnAClient, logPrefix: "TestStream_AtoB_ClientEnd(2)");
+      aToBServerEnd = YamuxStream(
           id: 2, protocol: bitswapProtocolId, metadata: {}, initialWindowSize: 256 * 1024,
           maxFrameSize: 16 * 1024,
-          sendFrame: (frame) async => frames_a_to_b_in_controller.add(frame),
-          parentConn: mockConn_A_server, logPrefix: "TestStream_AtoB_ServerEnd(2)");
+          sendFrame: (frame) async => framesAToBIn.add(frame),
+          parentConn: mockConnAServer, logPrefix: "TestStream_AtoB_ServerEnd(2)");
       
-      frames_a_to_b_out_controller.stream.listen((frame) => a_to_b_serverEnd.handleFrame(frame),
-        onError: (e) => print("ERROR in frames_a_to_b_out_controller listener: $e"));
-      frames_a_to_b_in_controller.stream.listen((frame) => a_to_b_clientEnd.handleFrame(frame),
-        onError: (e) => print("ERROR in frames_a_to_b_in_controller listener: $e"));
+      framesAToBOut.stream.listen((frame) => aToBServerEnd.handleFrame(frame),
+        onError: (e) => print("ERROR in framesAToBOut listener: $e"));
+      framesAToBIn.stream.listen((frame) => aToBClientEnd.handleFrame(frame),
+        onError: (e) => print("ERROR in framesAToBIn listener: $e"));
 
       // Configure MockHost newStream calls
       when(mockHostB.newStream(peerIdA, [bitswapProtocolId], any)).thenAnswer((_) async {
-        await b_to_a_clientEnd.open();
-        return b_to_a_clientEnd;
+        await bToAClientEnd.open();
+        return bToAClientEnd;
       });
       when(mockHostA.newStream(peerIdB, [bitswapProtocolId], any)).thenAnswer((_) async {
-        await a_to_b_clientEnd.open();
-        return a_to_b_clientEnd;
+        await aToBClientEnd.open();
+        return aToBClientEnd;
       });
       
       targetBlockData = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
@@ -199,16 +197,12 @@ void main() {
       when(mockPeerInfoB.protocols).thenReturn({bitswapProtocolId});
       when(mockPeerStoreA.getPeer(peerIdB)).thenAnswer((_) async => mockPeerInfoB); // Use real PeerId
 
-      bitswapA = Bitswap(
-        host: mockHostA,
-        blockStore: mockBlockStoreA,
-        peerEventsStream: eventControllerA.stream,
-      );
-      bitswapB = Bitswap(
-        host: mockHostB,
-        blockStore: mockBlockStoreB,
-        peerEventsStream: eventControllerB.stream,
-      );
+      stubPeerEvents(mockEventBusA, eventControllerA.stream);
+      bitswapA = Bitswap(host: mockHostA, blockStore: mockBlockStoreA);
+      await bitswapA.start();
+      stubPeerEvents(mockEventBusB, eventControllerB.stream);
+      bitswapB = Bitswap(host: mockHostB, blockStore: mockBlockStoreB);
+      await bitswapB.start();
       
       await Future.delayed(Duration.zero); 
       expect(streamHandlerA, isNotNull, reason: "Stream handler for Node A should be set by Bitswap constructor");
@@ -216,18 +210,20 @@ void main() {
     });
 
     tearDown(() async {
+      await bitswapA.stop();
+      await bitswapB.stop();
       await eventControllerA.close();
       await eventControllerB.close();
-      await frames_b_to_a_out_controller.close();
-      await frames_b_to_a_in_controller.close();
-      await frames_a_to_b_out_controller.close();
-      await frames_a_to_b_in_controller.close();
+      await framesBToAOut.close();
+      await framesBToAIn.close();
+      await framesAToBOut.close();
+      await framesAToBIn.close();
       
       // Ensure YamuxStreams are closed if they weren't already by the test logic
-      if (!b_to_a_clientEnd.isClosed) await b_to_a_clientEnd.close();
-      if (!b_to_a_serverEnd.isClosed) await b_to_a_serverEnd.close();
-      if (!a_to_b_clientEnd.isClosed) await a_to_b_clientEnd.close();
-      if (!a_to_b_serverEnd.isClosed) await a_to_b_serverEnd.close();
+      if (!bToAClientEnd.isClosed) await bToAClientEnd.close();
+      if (!bToAServerEnd.isClosed) await bToAServerEnd.close();
+      if (!aToBClientEnd.isClosed) await aToBClientEnd.close();
+      if (!aToBServerEnd.isClosed) await aToBServerEnd.close();
     });
 
     test('Node B requests block from Node A, Node A sends it, Node B receives it', () async {
@@ -244,13 +240,17 @@ void main() {
 
       // Simulate Node A's host invoking its Bitswap handler for the incoming stream from B
       expect(streamHandlerA, isNotNull, reason: "Stream handler for Node A must be captured.");
-      // The stream B opened to A is b_to_a_clientEnd, its other end is b_to_a_serverEnd.
-      // A's Bitswap handler (onIncomingStream) should be called with b_to_a_serverEnd.
-      // No explicit open needed here; handleFrame on b_to_a_serverEnd should open it upon receiving data.
-      await streamHandlerA!(b_to_a_serverEnd, peerIdB);
-      
-      // Allow BitswapA to process WANT, initiate stream to B, and send BLOCK
-      await Future.delayed(Duration.zero);
+      // The stream B opened to A is bToAClientEnd, its other end is bToAServerEnd.
+      // A's Bitswap handler (onIncomingStream) should be called with bToAServerEnd.
+      // No explicit open needed here; handleFrame on bToAServerEnd should open it upon receiving data.
+      // The handler reads until the stream closes (streams are long-lived), so
+      // run it in the background as a real host would rather than awaiting it.
+      await waitUntilOpen(bToAServerEnd);
+      unawaited(streamHandlerA!(bToAServerEnd, peerIdB));
+
+      // Wait for BitswapA to process the WANT and open a stream back to B
+      await untilCalled(mockHostA.newStream(peerIdB, [bitswapProtocolId], any))
+          .timeout(const Duration(seconds: 5));
 
       verify(mockHostA.newStream(
         peerIdB,
@@ -260,10 +260,11 @@ void main() {
 
       // Simulate Node B's host invoking its Bitswap handler for the incoming stream from A
       expect(streamHandlerB, isNotNull, reason: "Stream handler for Node B must be captured.");
-      // The stream A opened to B is a_to_b_clientEnd, its other end is a_to_b_serverEnd.
-      // B's Bitswap handler should be called with a_to_b_serverEnd.
-      // No explicit open needed here; handleFrame on a_to_b_serverEnd should open it upon receiving data.
-      await streamHandlerB!(a_to_b_serverEnd, peerIdA);
+      // The stream A opened to B is aToBClientEnd, its other end is aToBServerEnd.
+      // B's Bitswap handler should be called with aToBServerEnd.
+      // No explicit open needed here; handleFrame on aToBServerEnd should open it upon receiving data.
+      await waitUntilOpen(aToBServerEnd);
+      unawaited(streamHandlerB!(aToBServerEnd, peerIdA));
       
       final receivedBlockOnB = await getBlockFuture.timeout(Duration(seconds: 5), onTimeout: () { // Increased timeout
         fail("getBlockFuture timed out with YamuxStreams");
@@ -275,4 +276,16 @@ void main() {
       verify(mockBlockStoreB.put(targetCid, targetBlockData)).called(1);
     });
   });
+}
+
+/// A real host only dispatches an inbound stream to its handler once the
+/// remote's SYN has opened it; wait for that before invoking the handler.
+Future<void> waitUntilOpen(YamuxStream stream) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (stream.streamState != YamuxStreamState.open) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('Stream ${stream.id()} did not open (state: ${stream.streamState})');
+    }
+    await Future.delayed(const Duration(milliseconds: 1));
+  }
 }

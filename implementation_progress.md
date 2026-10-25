@@ -19,7 +19,7 @@ This document tracks the implementation status of the `dart-libp2p-bitswap` modu
     -   [x] `entries` (repeated Entry) defined and used.
     -   [x] `full` (bool) defined and used.
 -   **`Message.Block`**
-    -   [x] `prefix` (bytes) defined; parsed in `_handleReceivedBlock`, constructed in `_handleWantlist`.
+    -   [x] `prefix` (bytes) defined; parsed by `cidFromPrefixAndData`, built by `encodeCidPrefix` (`lib/src/cid_prefix.dart`).
     -   [x] `data` (bytes) defined and used.
 -   **`Message.BlockPresence`**
     -   [x] `BlockPresenceType` enum (`Have`, `DontHave`) defined in proto.
@@ -37,61 +37,39 @@ This document tracks the implementation status of the `dart-libp2p-bitswap` modu
 ## 3. Interaction Pattern (1.2.0)
 
 -   **Client (C) Wants Data from Server (S):**
-    -   [x] **Client sends want message:** `BitswapNetworkService.sendMessage` and `Bitswap.wantBlocks`.
-    -   [x] **Client sends complete wantlist or update:** `Message_Wantlist.full` handled in `_handleWantlist`.
-    -   [x] **Client reuses stream:** `BitswapNetworkService` reuses streams.
+    -   [x] **Client sends want message:** `BitswapClient.wantBlocks` via `BitswapNetworkService.sendMessage`.
+    -   [x] **Client sends complete wantlist or update:** `full` sent on first contact (`BitswapClient`), honoured in `BitswapServer.handleWantlist`.
+    -   [x] **Client reuses stream:** `BitswapNetworkService` keeps one outgoing stream per peer, with sends serialised in order.
     -   [ ] **Client specifies `wantType` (Block/Have) & `sendDontHave`:**
         -   [x] Proto fields exist and are processed on receipt.
         -   [ ] **TODO:** Allow `Bitswap.wantBlocks` to specify `wantType` and `sendDontHave` per CID for outgoing wants. (Currently defaults to `Block` and `sendDontHave=false`).
 -   **Server (S) Responds:**
-    -   [x] **Server responds on stream, reuses stream:** `_onIncomingStream` handles messages; `BitswapNetworkService` reuses outgoing streams.
+    -   [x] **Server responds on stream, reuses stream:** `BitswapNetworkService.onIncomingStream` reads multiple messages per stream; replies go out on our own outgoing stream.
     -   [ ] **Server response to `Have` request:**
         -   [x] Responds with `Have` `BlockPresence` if block is present.
         -   [ ] **TODO (Optimization):** Consider responding with the block itself if it's very small, as per spec.
     -   [x] **Server response to `Have` (block not present, `sendDontHave` is true):** Responds with `DontHave` `BlockPresence`.
     -   [ ] **Server MAY include `pendingBytes`:** (Covered in section 2 `pendingBytes` TODOs).
     -   [ ] **Server SHOULD respect priority:**
-        -   [x] `priority` field exists in `WantlistEntry` and is stored by `WantManager`.
-        -   [ ] **TODO:** Implement active prioritization of responses in `_handleWantlist` based on `priority`.
+        -   [x] `priority` is stored per peer in `PeerLedger`.
+        -   [ ] **TODO:** Serve in priority order — tracked in bead bsw-0u2.7.
 -   **Client (C) Cancels Want:**
-    -   [x] **Client sends Cancel message:** `_sendCancelMessages` called in `_handleReceivedBlock`.
+    -   [x] **Client sends Cancel message:** sent on block arrival, on `cancelWants`, and when the last `getBlock` waiter gives up (`BitswapClient`).
 
 ## 4. Other Spec Points
 
 -   [x] **Message-based protocol:** Implemented.
--   [x] **Varint length-prefixing:** Implemented in `BitswapNetworkService` using `dart_cid` utilities.
+-   [x] **Varint length-prefixing:** Implemented in `BitswapNetworkService` using `dcid` varint utilities.
 -   [ ] **Block Sizes (<= 2MiB recommended):**
     -   [ ] **Note:** No explicit checks in Bitswap logic; relies on block store and network layers. Consider if explicit checks/warnings are needed.
--   [ ] **Protocol Message Sizes (<= 4MiB):**
-    -   [ ] **Note:** No explicit checks for outgoing/incoming message sizes against this limit. Consider for robustness.
+-   [x] **Protocol Message Sizes (<= 4MiB):** Inbound messages over 4 MiB reset the stream; responses are packed into messages of at most 4 MiB (`packResponse`).
 
 ## 5. General Implementation Details
 
--   [x] **CID Reconstruction:** Implemented in `_handleReceivedBlock`.
--   [x] **Robust `_getBitswapPeers()`:** Implemented in `Bitswap.dart` using host network/peerstore.
--   [x] **Peer Disconnection Handling:** Basic framework implemented in `Bitswap.dart` using `EvtPeerConnectednessChanged` to clean up state.
+-   [x] **CID Reconstruction:** `cidFromPrefixAndData` (CIDv0 and CIDv1), used by `BitswapClient.handleBlock`.
+-   [x] **Peer discovery:** `BitswapClient` uses peers that spoke Bitswap to us plus connected peers advertising the protocol.
+-   [x] **Peer Disconnection Handling:** `Bitswap` subscribes to `EvtPeerConnectednessChanged` on `host.eventBus` and clears client, server and stream state.
 
-## Summary of Key Pending Implementation TODOs:
+## Open work
 
-1.  **`pendingBytes` Field:**
-    *   Implement setting `pendingBytes` in outgoing messages.
-    *   Implement reading and acting upon `pendingBytes` from incoming messages.
-2.  **Client-side `wantBlocks` Flexibility:**
-    *   Allow `Bitswap.wantBlocks` to specify `wantType` (Block/Have) and `sendDontHave` per CID.
-3.  **Server-side Response to `Have` Requests (Optimization):**
-    *   Consider responding with the block itself if it's very small when handling a `Have` request.
-4.  **Server-side Prioritization:**
-    *   Implement logic in `_handleWantlist` to respect the `priority` field from incoming wantlist entries.
-5.  **Message/Block Size Limit Considerations:**
-    *   Evaluate if explicit checks or warnings for block sizes (<=2MiB) or total message sizes (<=4MiB) are needed for robustness.
-6.  **Refine Peer Disconnection/Stream Error Handling:**
-    *   `BitswapNetworkService`: More robustly listen for stream close/error events to remove streams from `_activeStreams` (currently only removed on send error or explicit disconnect).
-    *   `Bitswap`: Consider re-evaluation of local wants if a peer disconnects who was the sole provider for certain CIDs.
-7.  **General TODOs from code:**
-    *   `Bitswap._handleWantlist`: Stop in-progress sending efforts on CANCEL.
-    *   `Bitswap.wantBlocks`: Potentially queue wantlist or try discovery if no peers initially.
-    *   `BitswapNetworkService.start`: Potentially discover existing peers.
-    *   `BitswapNetworkService._onIncomingStream`: Handle cases where `upstreamFrameData` might contain more than one Bitswap message.
-    *   `WantManager.blockReceived`: Enhance notifications.
-    *   `WantManager.receivedHave`: Potentially prioritize fetching.
-    *   `WantManager.receivedDontHave`: Deprioritize/stop asking peer.
+Remaining work is tracked in the beads issue tracker under epic `bsw-0u2` (`bd ready`, `bd show bsw-0u2`), not in this file.
