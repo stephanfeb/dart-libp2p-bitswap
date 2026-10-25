@@ -9,13 +9,19 @@ import '../proto/bitswap_message.pb.dart' as pb;
 
 final _log = Logger('bitswap.client.wantlist');
 
+/// What we have sent to, and heard from, one peer about one want.
+class PeerWantState {
+  bool sentBlock = false; // We sent WANT_BLOCK (otherwise WANT_HAVE)
+  bool? has; // null: no answer yet; true: HAVE; false: DONT_HAVE
+}
+
 /// A block our local node wants from the network.
 class LocalWant {
   final CID cid;
   final int priority;
   pb.Message_Wantlist_WantType wantType; // Upgraded in place from Have to Block
   final bool sendDontHave;
-  final Set<libp2p.PeerId> peersSentTo = {}; // Peers to whom this want has been sent
+  final Map<libp2p.PeerId, PeerWantState> peers = {}; // Peers this want was sent to
   final Completer<Uint8List> completer = Completer<Uint8List>(); // Completes when the block arrives
   int waiters = 0; // getBlock callers currently awaiting [completer]
 
@@ -26,9 +32,25 @@ class LocalWant {
     this.sendDontHave = false,
   });
 
+  /// Peers this want was sent to (and so must be CANCELled with).
+  Set<libp2p.PeerId> get peersSentTo => peers.keys.toSet();
+
+  /// The peer holding our outstanding WANT_BLOCK, if any. A peer that
+  /// answered DONT_HAVE no longer counts.
+  libp2p.PeerId? get blockPeer {
+    for (final MapEntry(key: peer, value: state) in peers.entries) {
+      if (state.sentBlock && state.has != false) return peer;
+    }
+    return null;
+  }
+
+  /// Peers that said HAVE but have not been sent WANT_BLOCK yet.
+  Iterable<libp2p.PeerId> get haveCandidates =>
+      peers.entries.where((e) => e.value.has == true && !e.value.sentBlock).map((e) => e.key);
+
   @override
   String toString() {
-    return 'LocalWant(cid: $cid, priority: $priority, type: $wantType, sendDontHave: $sendDontHave, peersSentTo: ${peersSentTo.length})';
+    return 'LocalWant(cid: $cid, priority: $priority, type: $wantType, sendDontHave: $sendDontHave, peers: ${peers.length})';
   }
 }
 
@@ -112,9 +134,34 @@ class LocalWantlist {
     entry.completer.completeError(error);
   }
 
-  /// Records that the want for [cid] was sent to [peerId].
-  void recordSentTo(CID cid, libp2p.PeerId peerId) {
-    _wants[cid.toString()]?.peersSentTo.add(peerId);
+  /// Records that the want for [cid] was sent to [peerId], as WANT_BLOCK if
+  /// [block] is true and WANT_HAVE otherwise.
+  void recordSentTo(CID cid, libp2p.PeerId peerId, {bool block = false}) {
+    final want = _wants[cid.toString()];
+    if (want == null) return;
+    final state = want.peers.putIfAbsent(peerId, PeerWantState.new);
+    if (block) state.sentBlock = true;
+  }
+
+  /// Records a HAVE ([has] true) or DONT_HAVE from [peerId] and returns the
+  /// want, or null if [cid] is not wanted.
+  LocalWant? recordPresence(CID cid, libp2p.PeerId peerId, {required bool has}) {
+    final want = _wants[cid.toString()];
+    if (want == null) return null;
+    want.peers.putIfAbsent(peerId, PeerWantState.new).has = has;
+    return want;
+  }
+
+  /// Forgets [peerId] (it disconnected) and returns the wants for which it
+  /// held our outstanding WANT_BLOCK.
+  List<LocalWant> forgetPeer(libp2p.PeerId peerId) {
+    final orphaned = <LocalWant>[];
+    for (final want in _wants.values) {
+      final wasBlockPeer = want.blockPeer == peerId;
+      want.peers.remove(peerId);
+      if (wasBlockPeer) orphaned.add(want);
+    }
+    return orphaned;
   }
 
   /// Peers the want for [cid] was sent to.

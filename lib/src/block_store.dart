@@ -14,5 +14,12 @@ class BitswapOptions {
   /// How long `Bitswap.getBlock` waits for a block unless told otherwise.
   final Duration getBlockTimeout;
 
-  const BitswapOptions({this.getBlockTimeout = const Duration(seconds: 30)});
+  /// How often outstanding wants are re-sent to peers not yet asked, and
+  /// re-targeted when no peer holds an outstanding WANT_BLOCK.
+  final Duration rebroadcastInterval;
+
+  const BitswapOptions({
+    this.getBlockTimeout = const Duration(seconds: 30),
+    this.rebroadcastInterval = const Duration(seconds: 10),
+  });
 }

@@ -50,6 +50,7 @@ class Bitswap {
     if (_started) return;
     _started = true;
     await _network.start();
+    _client.start();
 
     final subscription = _host.eventBus.subscribe(libp2p.EvtPeerConnectednessChanged);
     _peerEvents = subscription;
@@ -105,6 +106,15 @@ class Bitswap {
   /// asked. Pending [getBlock] calls for them complete with null.
   void cancelWants(List<dart_cid.CID> cids) => _client.cancelWants(cids);
 
+  /// Tells Bitswap that the application stored [cid] in the [BlockStore]
+  /// itself. Pending [getBlock] calls for it complete, peers we asked for it
+  /// get CANCEL, and peers that want it get the block (or a HAVE, if they
+  /// sent WANT_HAVE). [data] is trusted to match [cid].
+  void notifyNewBlock(dart_cid.CID cid, Uint8List data) {
+    _checkRunning();
+    _client.blockAdded(cid, data);
+  }
+
   /// Entry point for decoded messages from [BitswapNetworkService].
   @visibleForTesting
   Future<void> handleIncomingMessage(libp2p.PeerId peerId, pb.Message message) async {
@@ -131,7 +141,9 @@ class Bitswap {
 
   void _onPeerConnected(libp2p.PeerId peerId) {
     _log.fine('Peer connected: $peerId');
-    _client.peerConnected(peerId);
+    _client.peerConnected(peerId).catchError((Object e, StackTrace s) {
+      _log.warning('Error sending wantlist to newly connected peer $peerId', e, s);
+    });
   }
 
   void _checkRunning() {

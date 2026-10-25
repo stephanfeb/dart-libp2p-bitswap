@@ -110,9 +110,18 @@ await bitswap.wantBlocks([cid1, cid2]);
 bitswap.cancelWants([cid2]);
 ```
 
+Wants follow the Bitswap 1.2.0 pattern: each block is requested with `WANT_BLOCK` from one peer and `WANT_HAVE` from every other Bitswap peer, all with `sendDontHave`. If the `WANT_BLOCK` peer replies `DONT_HAVE` or disconnects, the `WANT_BLOCK` moves to a peer that said `HAVE`. Outstanding wants are rebroadcast every `BitswapOptions.rebroadcastInterval` (default 10s), so peers that connect or finish identify later are asked too. Newly connected peers get the wantlist straight away if their identify info lists `/ipfs/bitswap/1.2.0`.
+
 ### 4. Providing Blocks
 
 When peers request blocks present in your `BlockStore` (checked via `has` and `get`), Bitswap sends them automatically, split into messages of at most 4 MiB. Peers that send `WANT_HAVE` receive a `HAVE` presence rather than the block.
+
+Peers whose wants arrive before you have the block are remembered. When your application adds a block to the `BlockStore` itself, call `notifyNewBlock` so those peers are served, and so any pending `getBlock` for it completes:
+
+```dart
+await blockStore.put(cid, data);
+bitswap.notifyNewBlock(cid, data);
+```
 
 ### 5. Stopping Bitswap
 
@@ -143,7 +152,7 @@ Logger('bitswap').onRecord.listen((r) => print('${r.level.name} ${r.loggerName}:
 
 *   **`Bitswap`**: The main public class for interacting with the Bitswap service.
 *   **`BlockStore`**: An interface you must implement to provide block storage capabilities to the Bitswap service.
-*   **`BitswapOptions`**: Tunables such as the default `getBlock` timeout.
+*   **`BitswapOptions`**: Tunables: the default `getBlock` timeout and the wantlist rebroadcast interval.
 *   **`BitswapClient`** (`lib/src/client/`): (Internal) Fetching — our `LocalWantlist`, broadcasting wants, accepting blocks and presences.
 *   **`BitswapServer`** (`lib/src/server/`): (Internal) Serving — the per-peer `PeerLedger`, answering wantlists, size-limited response packing.
 *   **`BitswapNetworkService`** (`lib/src/network/`): (Internal) Stream handling, varint framing, and the ordered per-peer send queue.
