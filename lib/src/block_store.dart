@@ -18,8 +18,18 @@ class BitswapOptions {
   /// re-targeted when no peer holds an outstanding WANT_BLOCK.
   final Duration rebroadcastInterval;
 
+  /// Most wants remembered per remote peer. Wantlist entries for new CIDs
+  /// beyond this are ignored, bounding the memory one peer can claim.
+  final int maxWantsPerPeer;
+
+  /// Block bytes served to one peer before moving on to the next, so a peer
+  /// with a large wantlist cannot starve the others.
+  final int serveBytesPerTurn;
+
   const BitswapOptions({
     this.getBlockTimeout = const Duration(seconds: 30),
     this.rebroadcastInterval = const Duration(seconds: 10),
+    this.maxWantsPerPeer = 1024,
+    this.serveBytesPerTurn = 1024 * 1024,
   });
 }

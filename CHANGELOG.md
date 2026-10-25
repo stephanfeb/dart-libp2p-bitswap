@@ -25,6 +25,7 @@ Fixes:
 - Inbound messages over 4 MiB are rejected; responses are split to stay under 4 MiB.
 - Peers sending `WANT_HAVE` get a `HAVE` presence instead of the block.
 - The wantlist is sent on connect only to peers that speak Bitswap, rather than to every connected peer.
+- Serving is bounded and fair: at most `maxWantsPerPeer` wants per peer (default 1024); peers take turns of up to `serveBytesPerTurn` (default 1 MiB), highest priority first; serving no longer blocks the peer's read loop; a CANCEL received while a block is being read stops it being sent.
 - Concurrent `getBlock` calls share one want; one caller timing out no longer abandons it for others, and an abandoned want is cancelled with peers.
 
 ## 1.0.0

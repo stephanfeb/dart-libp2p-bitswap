@@ -116,6 +116,8 @@ Wants follow the Bitswap 1.2.0 pattern: each block is requested with `WANT_BLOCK
 
 When peers request blocks present in your `BlockStore` (checked via `has` and `get`), Bitswap sends them automatically, split into messages of at most 4 MiB. Peers that send `WANT_HAVE` receive a `HAVE` presence rather than the block.
 
+Serving runs off the network read path. Peers take turns, each served up to `BitswapOptions.serveBytesPerTurn` (default 1 MiB) of blocks per turn, highest-priority wants first. Each peer may have at most `BitswapOptions.maxWantsPerPeer` (default 1024) outstanding wants; entries beyond that are ignored. A want cancelled while its block is being read is not sent.
+
 Peers whose wants arrive before you have the block are remembered. When your application adds a block to the `BlockStore` itself, call `notifyNewBlock` so those peers are served, and so any pending `getBlock` for it completes:
 
 ```dart
@@ -152,7 +154,7 @@ Logger('bitswap').onRecord.listen((r) => print('${r.level.name} ${r.loggerName}:
 
 *   **`Bitswap`**: The main public class for interacting with the Bitswap service.
 *   **`BlockStore`**: An interface you must implement to provide block storage capabilities to the Bitswap service.
-*   **`BitswapOptions`**: Tunables: the default `getBlock` timeout and the wantlist rebroadcast interval.
+*   **`BitswapOptions`**: Tunables: the default `getBlock` timeout, the wantlist rebroadcast interval, and serving limits (`maxWantsPerPeer`, `serveBytesPerTurn`).
 *   **`BitswapClient`** (`lib/src/client/`): (Internal) Fetching — our `LocalWantlist`, broadcasting wants, accepting blocks and presences.
 *   **`BitswapServer`** (`lib/src/server/`): (Internal) Serving — the per-peer `PeerLedger`, answering wantlists, size-limited response packing.
 *   **`BitswapNetworkService`** (`lib/src/network/`): (Internal) Stream handling, varint framing, and the ordered per-peer send queue.

@@ -39,7 +39,7 @@ class Bitswap {
     this.options = const BitswapOptions(),
   }) : _host = host {
     _network = BitswapNetworkService(host, handleIncomingMessage);
-    _server = BitswapServer(blockStore, _network);
+    _server = BitswapServer(blockStore, _network, options);
     _client = BitswapClient(host, blockStore, _network, options, _server.blockAvailable);
   }
 
@@ -77,6 +77,7 @@ class Bitswap {
     _stopped = true;
     await _peerEventsListener?.cancel();
     await _peerEvents?.close();
+    _server.stop();
     await _network.stop();
     _client.stop(StateError('Bitswap stopped'));
     _log.fine('Bitswap stopped.');
@@ -121,7 +122,7 @@ class Bitswap {
     if (_stopped) return;
     if (message.hasWantlist()) {
       _client.peerActive(peerId);
-      await _server.handleWantlist(peerId, message.wantlist);
+      _server.handleWantlist(peerId, message.wantlist);
     }
     for (final block in message.payload) {
       await _client.handleBlock(peerId, block);

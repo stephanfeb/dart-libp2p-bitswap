@@ -25,22 +25,35 @@ class PeerWant {
 
 /// What each remote peer currently wants from us.
 class PeerLedger {
+  /// Most wants kept per peer; further new CIDs are ignored.
+  final int maxWantsPerPeer;
+
   // Key: PeerId, Value: Map<String (CID), PeerWant>
   final Map<libp2p.PeerId, Map<String, PeerWant>> _wants = {};
 
-  /// Adds or replaces [peerId]'s want for [cid].
-  void addWant(libp2p.PeerId peerId, CID cid, {
+  PeerLedger({this.maxWantsPerPeer = 1024});
+
+  /// Adds or replaces [peerId]'s want for [cid]. Returns false, recording
+  /// nothing, if [cid] is new and [peerId] already has [maxWantsPerPeer].
+  bool addWant(libp2p.PeerId peerId, CID cid, {
     int priority = 1,
     pb.Message_Wantlist_WantType wantType = pb.Message_Wantlist_WantType.Block,
     bool sendDontHave = false,
   }) {
-    _wants.putIfAbsent(peerId, () => {})[cid.toString()] = PeerWant(
+    final peerWants = _wants.putIfAbsent(peerId, () => {});
+    final key = cid.toString();
+    if (peerWants.length >= maxWantsPerPeer && !peerWants.containsKey(key)) return false;
+    peerWants[key] = PeerWant(
       cid: cid,
       priority: priority,
       wantType: wantType,
       sendDontHave: sendDontHave,
     );
+    return true;
   }
+
+  /// [peerId]'s current want for [cid], if any.
+  PeerWant? want(libp2p.PeerId peerId, CID cid) => _wants[peerId]?[cid.toString()];
 
   /// Removes [peerId]'s want for [cid] (cancelled, or fulfilled by us).
   PeerWant? removeWant(libp2p.PeerId peerId, CID cid) {
