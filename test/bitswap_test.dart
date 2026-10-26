@@ -14,6 +14,7 @@ import 'package:mockito/annotations.dart';
 
 import 'bitswap_test.mocks.dart'; // Will be generated
 import 'test_helpers.dart';
+import 'stream_stubs.dart';
 
 // Define a mockable class for the object returned by eventBus.subscribe()
 abstract class TestEventSubscription<T> implements libp2p.Subscription<T> { // Added implements
@@ -80,6 +81,7 @@ void main() {
     
     // Default stub for newStream (used by internal NetworkService)
     final mockP2PStream = MockP2PStream();
+    stubLiveStream(mockP2PStream);
     when(mockP2PStream.id()).thenReturn('mock-stream-default');
     when(mockP2PStream.write(any)).thenAnswer((_) async {});
     when(mockP2PStream.close()).thenAnswer((_) async {});
@@ -206,7 +208,11 @@ void main() {
       
       // Reset newStream mock call count before the second call
       clearInteractions(mockHost); 
-      when(mockHost.newStream(any, any, any)).thenAnswer((_) async => MockP2PStream()); // Re-stub
+      when(mockHost.newStream(any, any, any)).thenAnswer((_) async { // Re-stub
+        final stream = MockP2PStream();
+        stubLiveStream(stream);
+        return stream;
+      });
 
       await bitswap.wantBlocks([cid1]); // Second call, want should be old
       verifyNever(mockHost.newStream(any, any, any));
@@ -253,6 +259,7 @@ void main() {
 
       // The internal NetworkService will use mockHost.newStream to send the response
       final mockResponseStream = MockP2PStream();
+      stubLiveStream(mockResponseStream);
       when(mockResponseStream.id()).thenReturn('mock-response-stream');
       when(mockResponseStream.write(any)).thenAnswer((_) async {});
       when(mockResponseStream.close()).thenAnswer((_) async {});
@@ -360,6 +367,7 @@ void main() {
 
       // Set up the mock stream used for everything we send to the peer
       final mockResponseStream = MockP2PStream();
+      stubLiveStream(mockResponseStream);
       when(mockResponseStream.id()).thenReturn('mock-push-stream');
       when(mockResponseStream.write(any)).thenAnswer((_) async {});
       when(mockResponseStream.close()).thenAnswer((_) async {});
@@ -429,6 +437,7 @@ void main() {
 
     setUp(() {
       peerStream = MockP2PStream();
+      stubLiveStream(peerStream);
       when(peerStream.id()).thenReturn('peer-stream');
       when(peerStream.write(any)).thenAnswer((_) async {});
       when(peerStream.close()).thenAnswer((_) async {});
@@ -488,6 +497,8 @@ void main() {
       when(mockPeerStore.getPeer(testPeerId1)).thenAnswer((_) async => peerInfo);
 
       peerStream = MockP2PStream();
+
+      stubLiveStream(peerStream);
       when(peerStream.id()).thenReturn('peer-stream');
       when(peerStream.write(any)).thenAnswer((_) async {});
       when(peerStream.close()).thenAnswer((_) async {});

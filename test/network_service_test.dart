@@ -11,6 +11,7 @@ import 'package:mockito/annotations.dart';
 
 // Import the generated mocks
 import 'network_service_test.mocks.dart';
+import 'stream_stubs.dart';
 
 // Annotation to generate mocks
 @GenerateMocks([
@@ -66,6 +67,8 @@ void main() {
       when(mockPeerId.toBase58()).thenReturn(expectedBase58PeerId);
 
       mockStream = MockP2PStream();
+
+      stubLiveStream(mockStream);
       when(mockStream.id()).thenReturn('testStreamId');
       when(mockStream.protocol()).thenReturn(networkService.protocolId);
       when(mockStream.write(any)).thenAnswer((_) async => {});
@@ -198,6 +201,7 @@ void main() {
 
       test('retries once on a fresh stream when a reused stream fails', () async {
         final staleStream = MockP2PStream();
+        stubLiveStream(staleStream);
         when(staleStream.id()).thenReturn('stale');
         when(staleStream.close()).thenAnswer((_) async {});
         var staleWrites = 0;
@@ -241,6 +245,88 @@ void main() {
 
         final sent = verify(mockStream.write(captureAny)).captured.cast<Uint8List>();
         expect(sent.map(markerOf), [2]);
+      });
+    });
+
+    group('remote close of outgoing streams', () {
+      late MockP2PStream first;
+      late Completer<Uint8List> firstRead;
+
+      setUp(() {
+        first = MockP2PStream();
+        firstRead = Completer<Uint8List>();
+        when(first.isClosed).thenReturn(false);
+        when(first.read(any)).thenAnswer((_) => firstRead.future);
+        when(first.id()).thenReturn('first');
+        when(first.write(any)).thenAnswer((_) async {});
+        when(first.close()).thenAnswer((_) async {});
+        final streams = [first, mockStream];
+        when(mockHost.newStream(any, any, any)).thenAnswer((_) async => streams.removeAt(0));
+      });
+
+      Future<void> expectNextSendUsesFreshStream() async {
+        await networkService.sendMessage(remotePeer, pb.Message());
+        verify(first.write(any)).called(1); // Only the first message
+        verify(mockStream.write(any)).called(1);
+        verify(mockHost.newStream(any, any, any)).called(2);
+      }
+
+      test('EOF on our outgoing stream drops it before the next send', () async {
+        await networkService.sendMessage(remotePeer, pb.Message());
+
+        firstRead.complete(Uint8List(0));
+        await pumpEventQueue();
+        expect(networkService.getActiveStreamsCount(), 0);
+        verify(first.close()).called(1);
+
+        await expectNextSendUsesFreshStream();
+      });
+
+      test('a reset of our outgoing stream drops it before the next send', () async {
+        await networkService.sendMessage(remotePeer, pb.Message());
+
+        firstRead.completeError(Exception('stream reset'));
+        await pumpEventQueue();
+        expect(networkService.getActiveStreamsCount(), 0);
+
+        await expectNextSendUsesFreshStream();
+      });
+
+      test('a cached stream already marked closed is not written to', () async {
+        await networkService.sendMessage(remotePeer, pb.Message());
+        when(first.isClosed).thenReturn(true);
+
+        await expectNextSendUsesFreshStream();
+      });
+
+      test('stop() copes with closes that end the watched read', () async {
+        // As on a real stream: closing it completes the pending read with EOF
+        when(first.close()).thenAnswer((_) async {
+          if (!firstRead.isCompleted) firstRead.complete(Uint8List(0));
+        });
+        final otherPeer = libp2p.PeerId.fromBytes(Uint8List.fromList([0x12, 0x20, ...List.filled(32, 7)]));
+        await networkService.sendMessage(remotePeer, pb.Message()); // first
+        await networkService.sendMessage(otherPeer, pb.Message()); // mockStream
+
+        await networkService.stop();
+
+        verify(first.close()).called(1);
+        verify(mockStream.close()).called(1);
+        expect(networkService.getActiveStreamsCount(), 0);
+      });
+
+      test('a late EOF on a replaced stream does not drop its replacement', () async {
+        await networkService.sendMessage(remotePeer, pb.Message()); // first
+        await networkService.handlePeerDisconnected(remotePeer); // closes first
+        await networkService.sendMessage(remotePeer, pb.Message()); // mockStream
+
+        firstRead.complete(Uint8List(0));
+        await pumpEventQueue();
+
+        expect(networkService.getActiveStreamsCount(), 1);
+        await networkService.sendMessage(remotePeer, pb.Message());
+        verify(mockHost.newStream(any, any, any)).called(2);
+        verify(mockStream.write(any)).called(2);
       });
     });
 

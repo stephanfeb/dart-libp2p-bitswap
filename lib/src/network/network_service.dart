@@ -60,15 +60,17 @@ class BitswapNetworkService {
     }
     _inboundStreams.clear();
     _sendQueues.clear();
-    // Close any active outgoing streams
-    for (final stream in activeStreams.values) { // Renamed
+    // Close any active outgoing streams. Take them out of the map first:
+    // closing one ends its watcher's read, and the watcher edits the map.
+    final outgoing = activeStreams.values.toList();
+    activeStreams.clear();
+    for (final stream in outgoing) {
       try {
         await stream.close();
       } catch (e) {
         _log.warning('Error closing stream ${stream.id()} during stop: $e');
       }
     }
-    activeStreams.clear(); // Renamed
     _log.fine('All active streams cleared.');
   }
 
@@ -234,9 +236,14 @@ class BitswapNetworkService {
       ..setAll(lengthPrefix.length, messageBytes);
 
     // A reused stream may have been closed by the remote since our last
-    // write, so a failure on one is retried once on a fresh stream.
+    // write without us noticing yet, so a failure on one is retried once on
+    // a fresh stream.
     for (var attempt = 0; attempt < 2; attempt++) {
-      final existing = activeStreams[peerId];
+      var existing = activeStreams[peerId];
+      if (existing != null && existing.isClosed) {
+        activeStreams.remove(peerId);
+        existing = null;
+      }
       libp2p.P2PStream stream;
       if (existing != null) {
         stream = existing;
@@ -249,6 +256,7 @@ class BitswapNetworkService {
         }
         activeStreams[peerId] = stream;
         _log.fine('Opened stream ${stream.id()} to $peerId.');
+        unawaited(_watchOutgoing(peerId, stream));
       }
 
       try {
@@ -265,6 +273,26 @@ class BitswapNetworkService {
         }
         if (existing == null) return; // Fresh stream failed too; give up
       }
+    }
+  }
+
+  /// Drops [stream] from the cache once the remote closes or resets it, so
+  /// the next send opens a fresh stream instead of first failing a write.
+  /// Bitswap peers never write on our outgoing streams, so a read that ends
+  /// (EOF) or fails means the remote is done with the stream.
+  Future<void> _watchOutgoing(libp2p.PeerId peerId, libp2p.P2PStream stream) async {
+    try {
+      while ((await stream.read()).isNotEmpty) {}
+    } catch (_) {
+      // Reset by the remote, or closed by us
+    }
+    if (!identical(activeStreams[peerId], stream)) return; // Already replaced or closed by us
+    _log.fine('Stream ${stream.id()} to $peerId was closed by the remote; dropping it.');
+    activeStreams.remove(peerId);
+    try {
+      await stream.close();
+    } catch (_) {
+      // Already gone
     }
   }
 }

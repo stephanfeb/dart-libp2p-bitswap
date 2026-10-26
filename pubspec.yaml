@@ -14,9 +14,11 @@ dependencies:
   dcid: ^1.0.0
   logging: ^1.2.0
   meta: ^1.9.0
+  pointycastle: ^3.9.1
   protobuf: ^3.1.0
 
 dev_dependencies:
+  dart_udx: ^2.0.1 # Transport for the example
   mockito: ^5.4.4
   analyzer: ^6.0.0  # Use a version compatible with mockito 5.4.5
   build_runner: ^2.4.13

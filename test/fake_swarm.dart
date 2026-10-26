@@ -8,6 +8,7 @@ import 'package:mockito/mockito.dart';
 
 import 'bitswap_test.mocks.dart';
 import 'test_helpers.dart';
+import 'stream_stubs.dart';
 
 const bitswapProtocolId = '/ipfs/bitswap/1.2.0';
 
@@ -46,6 +47,7 @@ class FakeSwarm {
     when(host.newStream(any, any, any)).thenAnswer((inv) async {
       final peer = inv.positionalArguments[0] as libp2p.PeerId;
       final stream = MockP2PStream();
+      stubLiveStream(stream);
       when(stream.id()).thenReturn('to-$peer');
       when(stream.close()).thenAnswer((_) async {});
       when(stream.write(any)).thenAnswer((w) async {

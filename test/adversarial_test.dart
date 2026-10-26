@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dart_libp2p_bitswap/src/bitswap.dart';
+import 'package:dart_libp2p_bitswap/src/cid_prefix.dart';
 import 'package:dart_libp2p_bitswap/src/proto/bitswap_message.pb.dart' as pb;
 import 'package:dcid/dcid.dart' as dart_cid;
 import 'package:mockito/mockito.dart';
@@ -124,6 +125,17 @@ void main() {
       verifyNever(store.put(any, any));
 
       await bitswap.handleIncomingMessage(peerA, blockMsg(rawPrefix, blockData));
+      expect(await pending, blockData);
+    });
+
+    test('a block hashed with a non-sha2 multihash (blake2b-256) completes getBlock', () async {
+      final prefix = [0x01, 0x55, 0xa0, 0xe4, 0x02, 0x20]; // raw, blake2b-256 (0xb220), 32 bytes
+      final blakeCid = cidFromPrefixAndData(Uint8List.fromList(prefix), blockData);
+      final pending = bitswap.getBlock(blakeCid, timeout: const Duration(hours: 1));
+      await pumpEventQueue();
+
+      await bitswap.handleIncomingMessage(peerA, blockMsg(prefix, blockData));
+
       expect(await pending, blockData);
     });
 

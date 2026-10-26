@@ -82,7 +82,8 @@ class MyBlockStore implements BlockStore {
 Construct `Bitswap` with your libp2p `Host` and block store, then call `start()`. Construction has no side effects; `start()` registers the `/ipfs/bitswap/1.2.0` protocol handler and subscribes to the host's event bus for peer connect/disconnect events.
 
 ```dart
-// 'host' is your initialized and started libp2p.Host
+// 'host' is your initialized and started libp2p.Host; see the example
+// below for a complete host setup
 final bitswap = Bitswap(
   host: host,
   blockStore: MyBlockStore(),
@@ -148,7 +149,13 @@ Logger('bitswap').onRecord.listen((r) => print('${r.level.name} ${r.loggerName}:
 
 ### Example
 
-`example/dart_libp2p_bitswap_example.dart` shows a `BlockStore` implementation; host setup there is still a placeholder.
+`example/dart_libp2p_bitswap_example.dart` starts two in-process hosts (UDX transport, Noise, Yamux), stores a block on one and fetches it from the other:
+
+```bash
+dart run example/dart_libp2p_bitswap_example.dart
+```
+
+It also shows a minimal in-memory `BlockStore`. Note that dart_libp2p's default address factory drops loopback addresses; the example passes `Libp2p.addrsFactory((addrs) => addrs)` so the two local hosts can dial each other.
 
 ## Key Components
 
@@ -166,7 +173,7 @@ This library implements version **1.2.0** of the Bitswap protocol, identified by
 *   `Block` and `Have` want types.
 *   `sendDontHave` requests.
 *   `HAVE` / `DONT_HAVE` block presence messages.
-*   CIDv0 and CIDv1 blocks via `prefix` and `data` in block payloads (sha2-256 and sha2-512).
+*   CIDv0 and CIDv1 blocks via `prefix` and `data` in block payloads. Received blocks are re-hashed and verified with: sha2-256/512, sha3-224/256/384/512, keccak-256/512, blake2b-256/512, and identity (up to 128 bytes). Blocks using other hash functions are rejected.
 *   4 MiB message size limit, matching go-bitswap / boxo.
 
 For full specification details, please refer to the [official Bitswap spec](https://github.com/ipfs/specs/blob/master/bitswap/README.md).
