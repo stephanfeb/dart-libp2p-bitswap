@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
@@ -38,7 +37,8 @@ void main() {
     bitswap = Bitswap(
       host: swarm.host,
       blockStore: store,
-      options: const BitswapOptions(rebroadcastInterval: Duration(milliseconds: 20)),
+      // No rebroadcast during these tests; timing_test.dart covers it
+      options: const BitswapOptions(rebroadcastInterval: Duration(hours: 1)),
     );
     await bitswap.start();
   });
@@ -121,28 +121,7 @@ void main() {
     expect(swarm.sentWantBlock(other, cid), isTrue);
   });
 
-  test('wants made with no peers go out on rebroadcast once a peer appears', () async {
-    await bitswap.wantBlocks([cid]);
-    swarm.addBitswapPeer(peerA);
-
-    await Future.delayed(const Duration(milliseconds: 60));
-
-    expect(swarm.sentWantBlock(peerA, cid), isTrue);
-    expect(swarm.sent[peerA]!.first.wantlist.full, isTrue);
-  });
-
-  test('rebroadcast re-targets WANT_BLOCK when every asked peer said DONT_HAVE', () async {
-    swarm.addBitswapPeer(peerA);
-    await bitswap.wantBlocks([cid]);
-    await pumpEventQueue();
-    await bitswap.handleIncomingMessage(peerA, dontHave);
-
-    swarm.addBitswapPeer(peerB);
-    await Future.delayed(const Duration(milliseconds: 60));
-
-    expect(swarm.sentWantBlock(peerB, cid), isTrue);
-    expect(swarm.entriesTo(peerA, cid), hasLength(1), reason: 'peers already asked are not re-sent');
-  });
+  // Rebroadcast is covered in fake time by timing_test.dart
 
   test('newly connected peer gets the wantlist only if it speaks Bitswap', () async {
     await bitswap.wantBlocks([cid]); // No peers yet

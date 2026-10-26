@@ -7,7 +7,7 @@ Breaking changes:
 - Construction has no side effects. Call `await bitswap.start()` before use; `wantBlocks`/`getBlock` throw `StateError` if not started or after `stop()`.
 - Unsolicited blocks (not on the local wantlist) are discarded instead of stored.
 - `getBlock` takes an optional `timeout` (default `BitswapOptions.getBlockTimeout`, 30s). It returns `null` only on timeout or cancellation; other errors propagate.
-- `stop()` fails pending `getBlock` calls with `StateError`.
+- `stop()` fails pending `getBlock` calls with `StateError`, and stops rebroadcasts and queued replies before its first await, so nothing more is sent while it runs.
 - The library logs via `package:logging` and no longer prints.
 
 New:

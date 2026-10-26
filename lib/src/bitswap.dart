@@ -75,11 +75,13 @@ class Bitswap {
   Future<void> stop() async {
     if (_stopped) return;
     _stopped = true;
+    // Stop timers and queued work before the first await, so nothing more is
+    // sent while streams and subscriptions are being torn down
+    _server.stop();
+    _client.stop(StateError('Bitswap stopped'));
     await _peerEventsListener?.cancel();
     await _peerEvents?.close();
-    _server.stop();
     await _network.stop();
-    _client.stop(StateError('Bitswap stopped'));
     _log.fine('Bitswap stopped.');
   }
 

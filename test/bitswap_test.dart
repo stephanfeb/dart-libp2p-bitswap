@@ -502,24 +502,7 @@ void main() {
         .where((e) => e.cancel)
         .toList();
 
-    test('one caller timing out does not abandon the want for another', () async {
-      final short = bitswap.getBlock(cid, timeout: const Duration(milliseconds: 10));
-      final long = bitswap.getBlock(cid, timeout: const Duration(seconds: 5));
-
-      expect(await short, isNull);
-      await bitswap.handleIncomingMessage(otherPeer, blockMsg());
-
-      expect(await long, blockData);
-    });
-
-    test('last waiter timing out sends CANCEL to peers that were asked', () async {
-      expect(await bitswap.getBlock(cid, timeout: const Duration(milliseconds: 10)), isNull);
-      await pumpEventQueue();
-
-      final cancels = cancelsSent();
-      expect(cancels, hasLength(1));
-      expect(cancels.single.block, cid.toBytes());
-    });
+    // Timeout behaviour is covered in fake time by timing_test.dart
 
     test('cancelWants completes pending getBlock with null and CANCELs peers', () async {
       final pending = bitswap.getBlock(cid, timeout: const Duration(seconds: 5));

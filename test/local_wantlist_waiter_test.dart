@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:typed_data';
 import 'package:test/test.dart';
 import 'package:dcid/dcid.dart';
@@ -124,12 +123,12 @@ void main() {
       // Ensure sampleCid1 is still wanted and its future is not completed
       expect(wantlist.contains(sampleCid1), isTrue);
       
-      // Check that future1 is not completed by using a timeout.
-      // If it completes, it means blockReceived for sampleCid2 incorrectly affected sampleCid1.
+      // If blockReceived for sampleCid2 incorrectly affected sampleCid1, its
+      // future would complete once pending microtasks have run
       bool future1Completed = false;
       future1.then((_) => future1Completed = true).catchError((_) => future1Completed = true);
 
-      await Future.delayed(Duration(milliseconds: 50)); // Give some time for potential incorrect completion
+      await pumpEventQueue();
       expect(future1Completed, isFalse, reason: "Future for wanted CID shouldn't complete when an unrelated block is received.");
 
       // Now complete the actual wanted block
