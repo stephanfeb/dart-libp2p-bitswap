@@ -27,7 +27,8 @@ void main() {
   final have = presence(pb.Message_BlockPresenceType.Have);
   final dontHave = presence(pb.Message_BlockPresenceType.DontHave);
 
-  libp2p.PeerId blockPeer() => [peerA, peerB, peerC].singleWhere((p) => swarm.sentWantBlock(p, cid));
+  libp2p.PeerId blockPeer() =>
+      [peerA, peerB, peerC].singleWhere((p) => swarm.sentWantBlock(p, cid));
 
   setUp(() async {
     swarm = FakeSwarm();
@@ -48,24 +49,32 @@ void main() {
     await swarm.events.close();
   });
 
-  test('sends WANT_BLOCK to one peer and WANT_HAVE to the rest, all with sendDontHave', () async {
+  test(
+      'sends WANT_BLOCK to one peer and WANT_HAVE to the rest, all with sendDontHave',
+      () async {
     [peerA, peerB, peerC].forEach(swarm.addBitswapPeer);
 
     await bitswap.wantBlocks([cid]);
     await pumpEventQueue();
 
     final types = {
-      for (final p in [peerA, peerB, peerC]) p: swarm.entriesTo(p, cid).single.wantType,
+      for (final p in [peerA, peerB, peerC])
+        p: swarm.entriesTo(p, cid).single.wantType,
     };
-    expect(types.values.where((t) => t == pb.Message_Wantlist_WantType.Block), hasLength(1));
-    expect(types.values.where((t) => t == pb.Message_Wantlist_WantType.Have), hasLength(2));
+    expect(types.values.where((t) => t == pb.Message_Wantlist_WantType.Block),
+        hasLength(1));
+    expect(types.values.where((t) => t == pb.Message_Wantlist_WantType.Have),
+        hasLength(2));
     for (final p in [peerA, peerB, peerC]) {
       expect(swarm.entriesTo(p, cid).single.sendDontHave, isTrue);
-      expect(swarm.sent[p]!.first.wantlist.full, isTrue, reason: 'first contact sends the full wantlist');
+      expect(swarm.sent[p]!.first.wantlist.full, isTrue,
+          reason: 'first contact sends the full wantlist');
     }
   });
 
-  test('a HAVE while a WANT_BLOCK is outstanding does not trigger another WANT_BLOCK', () async {
+  test(
+      'a HAVE while a WANT_BLOCK is outstanding does not trigger another WANT_BLOCK',
+      () async {
     [peerA, peerB, peerC].forEach(swarm.addBitswapPeer);
     await bitswap.wantBlocks([cid]);
     await pumpEventQueue();
@@ -78,7 +87,9 @@ void main() {
     expect(swarm.sentWantBlock(other, cid), isFalse);
   });
 
-  test('DONT_HAVE from the WANT_BLOCK peer moves WANT_BLOCK to a peer that said HAVE', () async {
+  test(
+      'DONT_HAVE from the WANT_BLOCK peer moves WANT_BLOCK to a peer that said HAVE',
+      () async {
     [peerA, peerB, peerC].forEach(swarm.addBitswapPeer);
     await bitswap.wantBlocks([cid]);
     await pumpEventQueue();
@@ -92,7 +103,9 @@ void main() {
     expect(swarm.sentWantBlock(haver, cid), isTrue);
   });
 
-  test('HAVE after the WANT_BLOCK peer said DONT_HAVE gets WANT_BLOCK immediately', () async {
+  test(
+      'HAVE after the WANT_BLOCK peer said DONT_HAVE gets WANT_BLOCK immediately',
+      () async {
     [peerA, peerB].forEach(swarm.addBitswapPeer);
     await bitswap.wantBlocks([cid]);
     await pumpEventQueue();
@@ -106,7 +119,9 @@ void main() {
     expect(swarm.sentWantBlock(other, cid), isTrue);
   });
 
-  test('disconnect of the WANT_BLOCK peer moves WANT_BLOCK to a peer that said HAVE', () async {
+  test(
+      'disconnect of the WANT_BLOCK peer moves WANT_BLOCK to a peer that said HAVE',
+      () async {
     [peerA, peerB].forEach(swarm.addBitswapPeer);
     await bitswap.wantBlocks([cid]);
     await pumpEventQueue();
@@ -115,7 +130,8 @@ void main() {
     await bitswap.handleIncomingMessage(other, have);
 
     swarm.connected.remove(holder);
-    swarm.events.add(libp2p.EvtPeerConnectednessChanged(peer: holder, connectedness: libp2p.Connectedness.notConnected));
+    swarm.events.add(libp2p.EvtPeerConnectednessChanged(
+        peer: holder, connectedness: libp2p.Connectedness.notConnected));
     await pumpEventQueue();
 
     expect(swarm.sentWantBlock(other, cid), isTrue);
@@ -123,13 +139,15 @@ void main() {
 
   // Rebroadcast is covered in fake time by timing_test.dart
 
-  test('newly connected peer gets the wantlist only if it speaks Bitswap', () async {
+  test('newly connected peer gets the wantlist only if it speaks Bitswap',
+      () async {
     await bitswap.wantBlocks([cid]); // No peers yet
 
     swarm.connected.addAll([peerA, peerB]);
     swarm.speaksBitswap.add(peerB);
     for (final p in [peerA, peerB]) {
-      swarm.events.add(libp2p.EvtPeerConnectednessChanged(peer: p, connectedness: libp2p.Connectedness.connected));
+      swarm.events.add(libp2p.EvtPeerConnectednessChanged(
+          peer: p, connectedness: libp2p.Connectedness.connected));
     }
     await pumpEventQueue();
 
@@ -137,15 +155,18 @@ void main() {
     expect(swarm.sentWantBlock(peerB, cid), isTrue);
   });
 
-  test('later wants to an already-contacted peer are sent as a delta', () async {
+  test('later wants to an already-contacted peer are sent as a delta',
+      () async {
     swarm.addBitswapPeer(peerA);
     await bitswap.wantBlocks([cid]);
-    final cid2 = dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', Uint8List.fromList([8]));
+    final cid2 =
+        dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', Uint8List.fromList([8]));
     await bitswap.wantBlocks([cid2]);
     await pumpEventQueue();
 
     expect(swarm.sent[peerA]!.map((m) => m.wantlist.full), [true, false]);
-    expect(swarm.sent[peerA]!.last.wantlist.entries.single.block, cid2.toBytes());
+    expect(
+        swarm.sent[peerA]!.last.wantlist.entries.single.block, cid2.toBytes());
   });
 
   test('block arrival CANCELs every peer that was asked', () async {
@@ -153,15 +174,18 @@ void main() {
     final pending = bitswap.getBlock(cid);
     await pumpEventQueue();
 
-    await bitswap.handleIncomingMessage(blockPeer(), pb.Message()
-      ..payload.add(pb.Message_Block()
-        ..prefix = [0x01, 0x55, 0x12, 0x20]
-        ..data = blockData));
+    await bitswap.handleIncomingMessage(
+        blockPeer(),
+        pb.Message()
+          ..payload.add(pb.Message_Block()
+            ..prefix = [0x01, 0x55, 0x12, 0x20]
+            ..data = blockData));
     expect(await pending, blockData);
     await pumpEventQueue();
 
     for (final p in [peerA, peerB, peerC]) {
-      expect(swarm.entriesTo(p, cid).last.cancel, isTrue, reason: '$p should get CANCEL');
+      expect(swarm.entriesTo(p, cid).last.cancel, isTrue,
+          reason: '$p should get CANCEL');
     }
   });
 
@@ -173,11 +197,14 @@ void main() {
           ..wantType = type
           ..sendDontHave = true));
 
-    test('serves the block to a peer whose WANT_BLOCK we could not answer', () async {
+    test('serves the block to a peer whose WANT_BLOCK we could not answer',
+        () async {
       swarm.addBitswapPeer(peerA);
-      await bitswap.handleIncomingMessage(peerA, wantFrom(pb.Message_Wantlist_WantType.Block));
+      await bitswap.handleIncomingMessage(
+          peerA, wantFrom(pb.Message_Wantlist_WantType.Block));
       await pumpEventQueue();
-      expect(swarm.sent[peerA]!.single.blockPresences.single.type, pb.Message_BlockPresenceType.DontHave);
+      expect(swarm.sent[peerA]!.single.blockPresences.single.type,
+          pb.Message_BlockPresenceType.DontHave);
 
       bitswap.notifyNewBlock(cid, blockData);
       await pumpEventQueue();
@@ -186,27 +213,32 @@ void main() {
     });
 
     test('sends HAVE to a peer that sent WANT_HAVE', () async {
-      final big = Uint8List.fromList(List.filled(2000, 1)); // Over wantHaveReplaceSize
+      final big =
+          Uint8List.fromList(List.filled(2000, 1)); // Over wantHaveReplaceSize
       final bigCid = dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', big);
       swarm.addBitswapPeer(peerA);
-      await bitswap.handleIncomingMessage(peerA, pb.Message()
-        ..wantlist = (pb.Message_Wantlist()
-          ..entries.add(pb.Message_Wantlist_Entry()
-            ..block = bigCid.toBytes()
-            ..wantType = pb.Message_Wantlist_WantType.Have
-            ..sendDontHave = true)));
+      await bitswap.handleIncomingMessage(
+          peerA,
+          pb.Message()
+            ..wantlist = (pb.Message_Wantlist()
+              ..entries.add(pb.Message_Wantlist_Entry()
+                ..block = bigCid.toBytes()
+                ..wantType = pb.Message_Wantlist_WantType.Have
+                ..sendDontHave = true)));
 
       bitswap.notifyNewBlock(bigCid, big);
       await pumpEventQueue();
 
       final last = swarm.sent[peerA]!.last;
       expect(last.payload, isEmpty);
-      expect(last.blockPresences.single.type, pb.Message_BlockPresenceType.Have);
+      expect(
+          last.blockPresences.single.type, pb.Message_BlockPresenceType.Have);
     });
 
     test('sends a tiny block itself to a peer that sent WANT_HAVE', () async {
       swarm.addBitswapPeer(peerA);
-      await bitswap.handleIncomingMessage(peerA, wantFrom(pb.Message_Wantlist_WantType.Have));
+      await bitswap.handleIncomingMessage(
+          peerA, wantFrom(pb.Message_Wantlist_WantType.Have));
 
       bitswap.notifyNewBlock(cid, blockData);
       await pumpEventQueue();
@@ -216,7 +248,8 @@ void main() {
       expect(last.payload.single.data, blockData);
     });
 
-    test('completes our own pending getBlock and CANCELs the peers asked', () async {
+    test('completes our own pending getBlock and CANCELs the peers asked',
+        () async {
       [peerA, peerB].forEach(swarm.addBitswapPeer);
       final pending = bitswap.getBlock(cid);
       await pumpEventQueue();
@@ -226,7 +259,8 @@ void main() {
       await pumpEventQueue();
 
       for (final p in [peerA, peerB]) {
-        expect(swarm.entriesTo(p, cid).last.cancel, isTrue, reason: '$p should get CANCEL');
+        expect(swarm.entriesTo(p, cid).last.cancel, isTrue,
+            reason: '$p should get CANCEL');
       }
     });
 

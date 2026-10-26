@@ -40,7 +40,8 @@ class Bitswap {
   }) : _host = host {
     _network = BitswapNetworkService(host, handleIncomingMessage);
     _server = BitswapServer(blockStore, _network, options);
-    _client = BitswapClient(host, blockStore, _network, options, _server.blockAvailable);
+    _client = BitswapClient(
+        host, blockStore, _network, options, _server.blockAvailable);
   }
 
   /// Registers the Bitswap protocol handler and starts tracking peer
@@ -52,7 +53,8 @@ class Bitswap {
     await _network.start();
     _client.start();
 
-    final subscription = _host.eventBus.subscribe(libp2p.EvtPeerConnectednessChanged);
+    final subscription =
+        _host.eventBus.subscribe(libp2p.EvtPeerConnectednessChanged);
     _peerEvents = subscription;
     _peerEventsListener = subscription.stream.listen(
       (event) {
@@ -64,7 +66,10 @@ class Bitswap {
         }
       },
       onError: (Object e, StackTrace s) {
-        _log.warning('Error on peer connectedness event stream; disconnection cleanup may be missed', e, s);
+        _log.warning(
+            'Error on peer connectedness event stream; disconnection cleanup may be missed',
+            e,
+            s);
       },
     );
     _log.fine('Bitswap started for host: ${_host.id.toBase58()}.');
@@ -120,7 +125,8 @@ class Bitswap {
 
   /// Entry point for decoded messages from [BitswapNetworkService].
   @visibleForTesting
-  Future<void> handleIncomingMessage(libp2p.PeerId peerId, pb.Message message) async {
+  Future<void> handleIncomingMessage(
+      libp2p.PeerId peerId, pb.Message message) async {
     if (_stopped) return;
     if (message.hasWantlist()) {
       _client.peerActive(peerId);
@@ -145,7 +151,8 @@ class Bitswap {
   void _onPeerConnected(libp2p.PeerId peerId) {
     _log.fine('Peer connected: $peerId');
     _client.peerConnected(peerId).catchError((Object e, StackTrace s) {
-      _log.warning('Error sending wantlist to newly connected peer $peerId', e, s);
+      _log.warning(
+          'Error sending wantlist to newly connected peer $peerId', e, s);
     });
   }
 

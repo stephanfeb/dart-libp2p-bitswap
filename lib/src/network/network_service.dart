@@ -13,7 +13,8 @@ import '../proto/bitswap_message.pb.dart' as pb;
 final _log = Logger('bitswap.network');
 
 // Callback type for when a full Bitswap message is received
-typedef BitswapMessageHandler = Future<void> Function(libp2p.PeerId peerId, pb.Message message);
+typedef BitswapMessageHandler = Future<void> Function(
+    libp2p.PeerId peerId, pb.Message message);
 
 /// Largest Bitswap message we accept or send (matches libp2p's
 /// network.MessageSizeMax used by go-bitswap / boxo).
@@ -55,7 +56,8 @@ class BitswapNetworkService {
       try {
         await stream.reset();
       } catch (e) {
-        _log.warning('Error resetting inbound stream ${stream.id()} during stop: $e');
+        _log.warning(
+            'Error resetting inbound stream ${stream.id()} during stop: $e');
       }
     }
     _inboundStreams.clear();
@@ -78,20 +80,23 @@ class BitswapNetworkService {
   Future<void> handlePeerDisconnected(libp2p.PeerId peerId) async {
     final stream = activeStreams.remove(peerId); // Renamed
     if (stream != null) {
-      _log.fine('Peer $peerId disconnected, closing and removing active stream ${stream.id()}.');
+      _log.fine(
+          'Peer $peerId disconnected, closing and removing active stream ${stream.id()}.');
       try {
         await stream.close();
       } catch (e) {
         _log.warning('Error closing stream for disconnected peer $peerId: $e');
       }
     } else {
-      _log.fine('handlePeerDisconnected called for $peerId, but no active stream found.');
+      _log.fine(
+          'handlePeerDisconnected called for $peerId, but no active stream found.');
     }
   }
 
   // Handles a new incoming libp2p stream for the Bitswap protocol
   // This method's signature might still need adjustment based on your Host.setStreamHandler
-  Future<void> onIncomingStream(libp2p.P2PStream stream, libp2p.PeerId peerId) async {
+  Future<void> onIncomingStream(
+      libp2p.P2PStream stream, libp2p.PeerId peerId) async {
     _log.fine('Received incoming Bitswap stream ${stream.id()} from $peerId');
     if (_stopped) {
       await stream.reset();
@@ -122,19 +127,23 @@ class BitswapNetworkService {
           // Try to decode varint from what we have so far
           if (bytesBuilder.length >= 1) {
             try {
-              final decodedVarint = dart_cid.decodeVarint(bytesBuilder.toBytes());
+              final decodedVarint =
+                  dart_cid.decodeVarint(bytesBuilder.toBytes());
               messageLength = decodedVarint.key;
               varintBytesConsumed = decodedVarint.value;
-              _log.finest('Decoded varint from $peerId. MessageLength: $messageLength, VarintBytesConsumed: $varintBytesConsumed. Buffered: ${bytesBuilder.length}');
+              _log.finest(
+                  'Decoded varint from $peerId. MessageLength: $messageLength, VarintBytesConsumed: $varintBytesConsumed. Buffered: ${bytesBuilder.length}');
 
               if (varintBytesConsumed <= 0) {
-                _log.warning('Error: Varint decoding resulted in 0 or negative bytes consumed from $peerId.');
+                _log.warning(
+                    'Error: Varint decoding resulted in 0 or negative bytes consumed from $peerId.');
                 return;
               }
               break; // Successfully decoded varint
             } catch (e) {
               if (bytesBuilder.length >= maxVarintLen) {
-                _log.warning('Error decoding varint prefix from $peerId after ${bytesBuilder.length} bytes. Error: $e');
+                _log.warning(
+                    'Error decoding varint prefix from $peerId after ${bytesBuilder.length} bytes. Error: $e');
                 return;
               }
               // Not enough bytes yet, continue reading below
@@ -147,36 +156,42 @@ class BitswapNetworkService {
             break;
           }
           bytesBuilder.add(chunk);
-          _log.finest('Read chunk of ${chunk.length} bytes from $peerId. Total buffered: ${bytesBuilder.length}');
+          _log.finest(
+              'Read chunk of ${chunk.length} bytes from $peerId. Total buffered: ${bytesBuilder.length}');
         }
 
         if (streamClosed) {
           if (bytesBuilder.isEmpty) {
             _log.fine('Stream from $peerId closed cleanly (no pending data).');
           } else {
-            _log.fine('Stream from $peerId closed with ${bytesBuilder.length} incomplete bytes. Discarding.');
+            _log.fine(
+                'Stream from $peerId closed with ${bytesBuilder.length} incomplete bytes. Discarding.');
           }
           return;
         }
 
         // At this point, messageLength and varintBytesConsumed are set.
         if (messageLength! > maxBitswapMessageSize) {
-          _log.warning('Message from $peerId declares $messageLength bytes, exceeding limit of $maxBitswapMessageSize. Resetting stream.');
+          _log.warning(
+              'Message from $peerId declares $messageLength bytes, exceeding limit of $maxBitswapMessageSize. Resetting stream.');
           await stream.reset();
           return;
         }
         final int totalExpectedLength = varintBytesConsumed! + messageLength;
-        _log.finest('Expecting total message length (prefix + payload) of $totalExpectedLength bytes from $peerId.');
+        _log.finest(
+            'Expecting total message length (prefix + payload) of $totalExpectedLength bytes from $peerId.');
 
         // Read the rest of the message body if not all received yet
         while (bytesBuilder.length < totalExpectedLength) {
           final Uint8List chunk = await stream.read();
           if (chunk.isEmpty) {
-            _log.fine('Stream from $peerId closed while reading message body. Expected $totalExpectedLength, got ${bytesBuilder.length}.');
+            _log.fine(
+                'Stream from $peerId closed while reading message body. Expected $totalExpectedLength, got ${bytesBuilder.length}.');
             return;
           }
           bytesBuilder.add(chunk);
-          _log.finest('Read body chunk of ${chunk.length} bytes from $peerId. Total buffered: ${bytesBuilder.length} / $totalExpectedLength');
+          _log.finest(
+              'Read body chunk of ${chunk.length} bytes from $peerId. Total buffered: ${bytesBuilder.length} / $totalExpectedLength');
         }
 
         final Uint8List allReceivedData = bytesBuilder.toBytes();
@@ -184,26 +199,34 @@ class BitswapNetworkService {
         // Extract the message payload
         final messagePayloadBytes = Uint8List.sublistView(
             allReceivedData, varintBytesConsumed, totalExpectedLength);
-        _log.finest('Extracted message payload of ${messagePayloadBytes.length} bytes for $peerId.');
+        _log.finest(
+            'Extracted message payload of ${messagePayloadBytes.length} bytes for $peerId.');
 
         // Deserialize and handle the message
         final message = pb.Message.fromBuffer(messagePayloadBytes);
-        _log.finest('Deserialized message from $peerId. Calling message handler.');
+        _log.finest(
+            'Deserialized message from $peerId. Calling message handler.');
         if (_stopped) return;
         await _messageHandler(peerId, message);
 
         // Carry forward any leftover bytes for the next message
         if (allReceivedData.length > totalExpectedLength) {
-          leftover = Uint8List.sublistView(allReceivedData, totalExpectedLength);
-          _log.finest('${leftover.length} leftover bytes carried to next message from $peerId.');
+          leftover =
+              Uint8List.sublistView(allReceivedData, totalExpectedLength);
+          _log.finest(
+              '${leftover.length} leftover bytes carried to next message from $peerId.');
         }
         // Loop back to process the next message
       }
     } catch (e, s) {
-      _log.warning('Error processing message from $peerId on stream ${stream.id()}', e, s);
+      _log.warning(
+          'Error processing message from $peerId on stream ${stream.id()}',
+          e,
+          s);
     } finally {
       _inboundStreams.remove(stream);
-      _log.fine('Finished processing incoming stream ${stream.id()} from $peerId.');
+      _log.fine(
+          'Finished processing incoming stream ${stream.id()} from $peerId.');
     }
   }
 
@@ -226,7 +249,8 @@ class BitswapNetworkService {
 
   Future<void> _sendNow(libp2p.PeerId peerId, pb.Message message) async {
     if (_stopped) return;
-    _log.finest('Sending to $peerId. Wantlist: ${message.hasWantlist()}, Payloads: ${message.payload.length}, Presences: ${message.blockPresences.length}');
+    _log.finest(
+        'Sending to $peerId. Wantlist: ${message.hasWantlist()}, Payloads: ${message.payload.length}, Presences: ${message.blockPresences.length}');
 
     final messageBytes = message.writeToBuffer();
     final lengthPrefix = dart_cid.encodeVarint(messageBytes.length);
@@ -249,7 +273,8 @@ class BitswapNetworkService {
         stream = existing;
       } else {
         try {
-          stream = await _host.newStream(peerId, [protocolId], libp2p.Context());
+          stream =
+              await _host.newStream(peerId, [protocolId], libp2p.Context());
         } catch (e) {
           _log.warning('Failed to open stream to $peerId: $e');
           return;
@@ -261,15 +286,19 @@ class BitswapNetworkService {
 
       try {
         await stream.write(frame);
-        _log.finest('Sent ${frame.length} bytes to $peerId on stream ${stream.id()}.');
+        _log.finest(
+            'Sent ${frame.length} bytes to $peerId on stream ${stream.id()}.');
         return;
       } catch (e) {
         _log.warning('Error writing to $peerId on stream ${stream.id()}: $e');
-        if (identical(activeStreams[peerId], stream)) activeStreams.remove(peerId);
+        if (identical(activeStreams[peerId], stream)) {
+          activeStreams.remove(peerId);
+        }
         try {
           await stream.close();
         } catch (closeError) {
-          _log.warning('Error closing stream ${stream.id()} after send error: $closeError');
+          _log.warning(
+              'Error closing stream ${stream.id()} after send error: $closeError');
         }
         if (existing == null) return; // Fresh stream failed too; give up
       }
@@ -280,14 +309,18 @@ class BitswapNetworkService {
   /// the next send opens a fresh stream instead of first failing a write.
   /// Bitswap peers never write on our outgoing streams, so a read that ends
   /// (EOF) or fails means the remote is done with the stream.
-  Future<void> _watchOutgoing(libp2p.PeerId peerId, libp2p.P2PStream stream) async {
+  Future<void> _watchOutgoing(
+      libp2p.PeerId peerId, libp2p.P2PStream stream) async {
     try {
       while ((await stream.read()).isNotEmpty) {}
     } catch (_) {
       // Reset by the remote, or closed by us
     }
-    if (!identical(activeStreams[peerId], stream)) return; // Already replaced or closed by us
-    _log.fine('Stream ${stream.id()} to $peerId was closed by the remote; dropping it.');
+    if (!identical(activeStreams[peerId], stream)) {
+      return; // Already replaced or closed by us
+    }
+    _log.fine(
+        'Stream ${stream.id()} to $peerId was closed by the remote; dropping it.');
     activeStreams.remove(peerId);
     try {
       await stream.close();

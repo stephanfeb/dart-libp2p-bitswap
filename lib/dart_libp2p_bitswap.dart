@@ -7,4 +7,3 @@ library;
 
 export 'src/bitswap.dart'; // Exports Bitswap, BitswapOptions and the BlockStore interface
 export 'src/proto/bitswap_message.pb.dart'; // Exports protobuf message types
-

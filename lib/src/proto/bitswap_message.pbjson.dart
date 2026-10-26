@@ -17,9 +17,30 @@ import 'dart:typed_data' as $typed_data;
 const Message$json = {
   '1': 'Message',
   '2': [
-    {'1': 'wantlist', '3': 1, '4': 1, '5': 11, '6': '.bitswap.pb.Message.Wantlist', '10': 'wantlist'},
-    {'1': 'payload', '3': 3, '4': 3, '5': 11, '6': '.bitswap.pb.Message.Block', '10': 'payload'},
-    {'1': 'blockPresences', '3': 4, '4': 3, '5': 11, '6': '.bitswap.pb.Message.BlockPresence', '10': 'blockPresences'},
+    {
+      '1': 'wantlist',
+      '3': 1,
+      '4': 1,
+      '5': 11,
+      '6': '.bitswap.pb.Message.Wantlist',
+      '10': 'wantlist'
+    },
+    {
+      '1': 'payload',
+      '3': 3,
+      '4': 3,
+      '5': 11,
+      '6': '.bitswap.pb.Message.Block',
+      '10': 'payload'
+    },
+    {
+      '1': 'blockPresences',
+      '3': 4,
+      '4': 3,
+      '5': 11,
+      '6': '.bitswap.pb.Message.BlockPresence',
+      '10': 'blockPresences'
+    },
     {'1': 'pendingBytes', '3': 5, '4': 1, '5': 5, '10': 'pendingBytes'},
   ],
   '3': [Message_Wantlist$json, Message_Block$json, Message_BlockPresence$json],
@@ -30,7 +51,14 @@ const Message$json = {
 const Message_Wantlist$json = {
   '1': 'Wantlist',
   '2': [
-    {'1': 'entries', '3': 1, '4': 3, '5': 11, '6': '.bitswap.pb.Message.Wantlist.Entry', '10': 'entries'},
+    {
+      '1': 'entries',
+      '3': 1,
+      '4': 3,
+      '5': 11,
+      '6': '.bitswap.pb.Message.Wantlist.Entry',
+      '10': 'entries'
+    },
     {'1': 'full', '3': 2, '4': 1, '5': 8, '10': 'full'},
   ],
   '3': [Message_Wantlist_Entry$json],
@@ -44,7 +72,14 @@ const Message_Wantlist_Entry$json = {
     {'1': 'block', '3': 1, '4': 1, '5': 12, '10': 'block'},
     {'1': 'priority', '3': 2, '4': 1, '5': 5, '10': 'priority'},
     {'1': 'cancel', '3': 3, '4': 1, '5': 8, '10': 'cancel'},
-    {'1': 'wantType', '3': 4, '4': 1, '5': 14, '6': '.bitswap.pb.Message.Wantlist.WantType', '10': 'wantType'},
+    {
+      '1': 'wantType',
+      '3': 4,
+      '4': 1,
+      '5': 14,
+      '6': '.bitswap.pb.Message.Wantlist.WantType',
+      '10': 'wantType'
+    },
     {'1': 'sendDontHave', '3': 5, '4': 1, '5': 8, '10': 'sendDontHave'},
   ],
 };
@@ -72,7 +107,14 @@ const Message_BlockPresence$json = {
   '1': 'BlockPresence',
   '2': [
     {'1': 'cid', '3': 1, '4': 1, '5': 12, '10': 'cid'},
-    {'1': 'type', '3': 2, '4': 1, '5': 14, '6': '.bitswap.pb.Message.BlockPresenceType', '10': 'type'},
+    {
+      '1': 'type',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.bitswap.pb.Message.BlockPresenceType',
+      '10': 'type'
+    },
   ],
 };
 
@@ -101,4 +143,3 @@ final $typed_data.Uint8List messageDescriptor = $convert.base64Decode(
     'VzZW5jZRIQCgNjaWQYASABKAxSA2NpZBI5CgR0eXBlGAIgASgOMiUuYml0c3dhcC5wYi5NZXNz'
     'YWdlLkJsb2NrUHJlc2VuY2VUeXBlUgR0eXBlIisKEUJsb2NrUHJlc2VuY2VUeXBlEggKBEhhdm'
     'UQABIMCghEb250SGF2ZRAB');
-

@@ -35,17 +35,21 @@ void main() {
         expect(m.writeToBuffer().length, lessThanOrEqualTo(limit));
       }
       // Nothing lost and order preserved
-      expect(messages.expand((m) => m.payload).map((b) => b.data.first), [for (var i = 0; i < 10; i++) i]);
+      expect(messages.expand((m) => m.payload).map((b) => b.data.first),
+          [for (var i = 0; i < 10; i++) i]);
     });
 
     test('puts presences ahead of blocks', () {
-      final messages = packResponse([presence(1), presence(2)], [block(800), block(800)], maxSize: 1000);
+      final messages = packResponse(
+          [presence(1), presence(2)], [block(800), block(800)],
+          maxSize: 1000);
       expect(messages.first.blockPresences, hasLength(2));
       expect(messages.expand((m) => m.payload), hasLength(2));
     });
 
     test('drops a block that cannot fit in any message', () {
-      final messages = packResponse([presence(1)], [block(2000), block(10)], maxSize: 1000);
+      final messages =
+          packResponse([presence(1)], [block(2000), block(10)], maxSize: 1000);
       final payload = messages.expand((m) => m.payload).toList();
       expect(payload, hasLength(1));
       expect(payload.single.data.length, 10);

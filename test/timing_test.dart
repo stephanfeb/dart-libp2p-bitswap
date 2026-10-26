@@ -36,7 +36,8 @@ void main() {
       final store = MockBlockStore();
       when(store.has(any)).thenAnswer((_) async => false);
       when(store.put(any, any)).thenAnswer((_) async {});
-      final bitswap = Bitswap(host: swarm.host, blockStore: store, options: options);
+      final bitswap =
+          Bitswap(host: swarm.host, blockStore: store, options: options);
       bitswap.start();
       time.flushMicrotasks();
 
@@ -59,7 +60,9 @@ void main() {
   }
 
   group('getBlock timeout', () {
-    test('returns null exactly at the default timeout and CANCELs the peer asked', () {
+    test(
+        'returns null exactly at the default timeout and CANCELs the peer asked',
+        () {
       inFakeTime((time, bitswap, swarm) {
         swarm.addBitswapPeer(peerA);
         final result = track(bitswap.getBlock(cid));
@@ -71,12 +74,16 @@ void main() {
         time.elapse(const Duration(milliseconds: 1));
         expect(result(), (done: true, value: null));
         expect(swarm.entriesTo(peerA, cid).last.cancel, isTrue);
-      }, options: const BitswapOptions(getBlockTimeout: Duration(seconds: 30), rebroadcastInterval: Duration(hours: 1)));
+      },
+          options: const BitswapOptions(
+              getBlockTimeout: Duration(seconds: 30),
+              rebroadcastInterval: Duration(hours: 1)));
     });
 
     test('an explicit timeout overrides the default', () {
       inFakeTime((time, bitswap, swarm) {
-        final result = track(bitswap.getBlock(cid, timeout: const Duration(seconds: 2)));
+        final result =
+            track(bitswap.getBlock(cid, timeout: const Duration(seconds: 2)));
         time.elapse(const Duration(seconds: 2));
         expect(result(), (done: true, value: null));
       });
@@ -85,12 +92,15 @@ void main() {
     test('one caller timing out does not abandon the want for another', () {
       inFakeTime((time, bitswap, swarm) {
         swarm.addBitswapPeer(peerA);
-        final short = track(bitswap.getBlock(cid, timeout: const Duration(seconds: 1)));
-        final long = track(bitswap.getBlock(cid, timeout: const Duration(seconds: 10)));
+        final short =
+            track(bitswap.getBlock(cid, timeout: const Duration(seconds: 1)));
+        final long =
+            track(bitswap.getBlock(cid, timeout: const Duration(seconds: 10)));
 
         time.elapse(const Duration(seconds: 1));
         expect(short(), (done: true, value: null));
-        expect(swarm.entriesTo(peerA, cid).any((e) => e.cancel), isFalse, reason: 'still wanted by the other caller');
+        expect(swarm.entriesTo(peerA, cid).any((e) => e.cancel), isFalse,
+            reason: 'still wanted by the other caller');
 
         bitswap.handleIncomingMessage(peerA, blockMsg);
         time.flushMicrotasks();
@@ -119,7 +129,9 @@ void main() {
       }, options: options);
     });
 
-    test('re-targets WANT_BLOCK when every asked peer said DONT_HAVE, without re-asking them', () {
+    test(
+        're-targets WANT_BLOCK when every asked peer said DONT_HAVE, without re-asking them',
+        () {
       inFakeTime((time, bitswap, swarm) {
         swarm.addBitswapPeer(peerA);
         bitswap.wantBlocks([cid]);

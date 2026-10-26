@@ -33,12 +33,14 @@ List<pb.Message> packResponse(
   }
 
   for (final presence in presences) {
-    add(presence.writeToBuffer().length + _fieldOverhead, (m) => m.blockPresences.add(presence));
+    add(presence.writeToBuffer().length + _fieldOverhead,
+        (m) => m.blockPresences.add(presence));
   }
   for (final block in blocks) {
     final size = block.writeToBuffer().length + _fieldOverhead;
     if (size > maxSize) {
-      _log.warning('Dropping block of ${block.data.length} bytes: exceeds message limit of $maxSize');
+      _log.warning(
+          'Dropping block of ${block.data.length} bytes: exceeds message limit of $maxSize');
       continue;
     }
     add(size, (m) => m.payload.add(block));

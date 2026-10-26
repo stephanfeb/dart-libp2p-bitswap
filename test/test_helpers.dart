@@ -15,5 +15,5 @@ void stubPeerEvents(MockEventBus bus, Stream<dynamic> events) {
 }
 
 /// A real, value-comparable PeerId (identity-style multihash) for tests.
-libp2p.PeerId testPeer(int n) =>
-    libp2p.PeerId.fromBytes(Uint8List.fromList([0x12, 0x20, ...List.filled(32, n)]));
+libp2p.PeerId testPeer(int n) => libp2p.PeerId.fromBytes(
+    Uint8List.fromList([0x12, 0x20, ...List.filled(32, n)]));

@@ -38,16 +38,19 @@ class BitswapClient {
   final Set<libp2p.PeerId> _peersWithFullWantlistSent = {};
   Timer? _rebroadcastTimer;
 
-  BitswapClient(this._host, this._blockStore, this._network, this._options, this._onBlockStored);
+  BitswapClient(this._host, this._blockStore, this._network, this._options,
+      this._onBlockStored);
 
   /// Starts periodic rebroadcast of outstanding wants.
   void start() {
-    _rebroadcastTimer ??= Timer.periodic(_options.rebroadcastInterval, (_) => rebroadcast());
+    _rebroadcastTimer ??=
+        Timer.periodic(_options.rebroadcastInterval, (_) => rebroadcast());
   }
 
   /// Adds [cids] to the wantlist and broadcasts them.
   Future<void> wantBlocks(List<dart_cid.CID> cids) async {
-    _log.fine(() => 'wantBlocks called with ${cids.length} CIDs: ${cids.join(', ')}');
+    _log.fine(
+        () => 'wantBlocks called with ${cids.length} CIDs: ${cids.join(', ')}');
     await _broadcastWants(_addWants(cids));
   }
 
@@ -91,7 +94,9 @@ class BitswapClient {
   Future<void> peerConnected(libp2p.PeerId peerId) async {
     if (_wantlist.isEmpty) return;
     final peerInfo = await _host.peerStore.getPeer(peerId);
-    if (peerInfo == null || !peerInfo.protocols.contains(_network.protocolId)) return;
+    if (peerInfo == null || !peerInfo.protocols.contains(_network.protocolId)) {
+      return;
+    }
     _sendPlanned(_wantlist.all, [peerId]);
   }
 
@@ -121,7 +126,8 @@ class BitswapClient {
   }
 
   /// Verifies and stores a block from [peerId] if we want it.
-  Future<void> handleBlock(libp2p.PeerId peerId, pb.Message_Block blockProto) async {
+  Future<void> handleBlock(
+      libp2p.PeerId peerId, pb.Message_Block blockProto) async {
     final prefixBytes = Uint8List.fromList(blockProto.prefix);
     final dataBytes = Uint8List.fromList(blockProto.data);
 
@@ -129,7 +135,8 @@ class BitswapClient {
     try {
       cid = cidFromPrefixAndData(prefixBytes, dataBytes);
     } on FormatException catch (e) {
-      _log.warning(() => 'Rejecting block from $peerId: ${e.message}. Prefix: ${hex.encode(prefixBytes)}');
+      _log.warning(() =>
+          'Rejecting block from $peerId: ${e.message}. Prefix: ${hex.encode(prefixBytes)}');
       return;
     }
 
@@ -206,7 +213,9 @@ class BitswapClient {
   Future<void> _broadcastWants(List<LocalWant> wants) async {
     if (wants.isEmpty) return;
     final peers = await _bitswapPeers();
-    if (peers.isEmpty) _log.fine('No known Bitswap peers; wants will go out on rebroadcast.');
+    if (peers.isEmpty) {
+      _log.fine('No known Bitswap peers; wants will go out on rebroadcast.');
+    }
     _sendPlanned(wants, peers);
   }
 
@@ -215,15 +224,24 @@ class BitswapClient {
   /// goes as WANT_HAVE to every other peer. Peers we have not messaged before
   /// get our full wantlist with `full` set.
   void _sendPlanned(List<LocalWant> wants, List<libp2p.PeerId> peers) {
-    final newPeers = [for (final p in peers) if (!_peersWithFullWantlistSent.contains(p)) p];
-    final knownPeers = [for (final p in peers) if (_peersWithFullWantlistSent.contains(p)) p];
+    final newPeers = [
+      for (final p in peers)
+        if (!_peersWithFullWantlistSent.contains(p)) p
+    ];
+    final knownPeers = [
+      for (final p in peers)
+        if (_peersWithFullWantlistSent.contains(p)) p
+    ];
 
     final outgoing = <libp2p.PeerId, List<pb.Message_Wantlist_Entry>>{};
     void plan(List<LocalWant> wants, List<libp2p.PeerId> peers) {
       for (final want in wants) {
-        if (!identical(_wantlist[want.cid], want)) continue; // Fulfilled or cancelled meanwhile
+        if (!identical(_wantlist[want.cid], want)) {
+          continue; // Fulfilled or cancelled meanwhile
+        }
         if (want.blockPeer == null) {
-          final target = want.haveCandidates.firstOrNull ?? peers.where((p) => !want.peers.containsKey(p)).firstOrNull;
+          final target = want.haveCandidates.firstOrNull ??
+              peers.where((p) => !want.peers.containsKey(p)).firstOrNull;
           if (target != null) {
             (outgoing[target] ??= []).add(_entryFor(want, block: true));
             _wantlist.recordSentTo(want.cid, target, block: true);
@@ -246,12 +264,17 @@ class BitswapClient {
     }
   }
 
-  void _sendEntries(libp2p.PeerId peerId, List<pb.Message_Wantlist_Entry> entries, {bool full = false}) {
-    _log.fine('Sending ${full ? 'full ' : ''}wantlist (${entries.length} entries) to $peerId');
-    _network.sendMessage(peerId, pb.Message()
-      ..wantlist = (pb.Message_Wantlist()
-        ..entries.addAll(entries)
-        ..full = full));
+  void _sendEntries(
+      libp2p.PeerId peerId, List<pb.Message_Wantlist_Entry> entries,
+      {bool full = false}) {
+    _log.fine(
+        'Sending ${full ? 'full ' : ''}wantlist (${entries.length} entries) to $peerId');
+    _network.sendMessage(
+        peerId,
+        pb.Message()
+          ..wantlist = (pb.Message_Wantlist()
+            ..entries.addAll(entries)
+            ..full = full));
   }
 
   void _sendCancels(dart_cid.CID cid, Set<libp2p.PeerId> peers) {
@@ -275,20 +298,26 @@ class BitswapClient {
       for (final conn in _host.network.conns) {
         final remotePeerId = conn.remotePeer;
         final peerInfo = await _host.peerStore.getPeer(remotePeerId);
-        if (peerInfo != null && peerInfo.protocols.contains(_network.protocolId)) {
+        if (peerInfo != null &&
+            peerInfo.protocols.contains(_network.protocolId)) {
           peers.add(remotePeerId);
         }
       }
     } catch (e) {
-      _log.warning('Error querying connected peers for Bitswap support: $e. Falling back to known active peers.');
+      _log.warning(
+          'Error querying connected peers for Bitswap support: $e. Falling back to known active peers.');
     }
     if (peers.isEmpty) _log.warning('Found no Bitswap-supporting peers.');
     return peers.toList();
   }
 
-  static pb.Message_Wantlist_Entry _entryFor(LocalWant want, {required bool block}) => pb.Message_Wantlist_Entry()
-    ..block = want.cid.toBytes()
-    ..wantType = block ? pb.Message_Wantlist_WantType.Block : pb.Message_Wantlist_WantType.Have
-    ..priority = want.priority
-    ..sendDontHave = true;
+  static pb.Message_Wantlist_Entry _entryFor(LocalWant want,
+          {required bool block}) =>
+      pb.Message_Wantlist_Entry()
+        ..block = want.cid.toBytes()
+        ..wantType = block
+            ? pb.Message_Wantlist_WantType.Block
+            : pb.Message_Wantlist_WantType.Have
+        ..priority = want.priority
+        ..sendDontHave = true;
 }

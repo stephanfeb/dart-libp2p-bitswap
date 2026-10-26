@@ -48,7 +48,8 @@ class BitswapServer {
   /// Wants we cannot answer yet stay in the ledger for [blockAvailable].
   void handleWantlist(libp2p.PeerId peerId, pb.Message_Wantlist wantlist) {
     if (_stopped) return;
-    _log.fine('Wantlist from $peerId. Entries: ${wantlist.entries.length}, Full: ${wantlist.full}');
+    _log.fine(
+        'Wantlist from $peerId. Entries: ${wantlist.entries.length}, Full: ${wantlist.full}');
 
     // Queued replies to wants dropped here are skipped when their turn comes
     if (wantlist.full) _ledger.clearPeer(peerId);
@@ -83,7 +84,8 @@ class BitswapServer {
       }
     }
     if (ignored > 0) {
-      _log.fine('Ignored $ignored wants from $peerId: over the limit of ${_ledger.maxWantsPerPeer}');
+      _log.fine(
+          'Ignored $ignored wants from $peerId: over the limit of ${_ledger.maxWantsPerPeer}');
     }
   }
 
@@ -147,7 +149,10 @@ class BitswapServer {
     if (pending == null) return;
     pending.removeWhere((_, reply) => _ledger.want(peerId, reply.cid) == null);
     final replies = pending.values.toList()
-      ..sort((a, b) => _ledger.want(peerId, b.cid)!.priority.compareTo(_ledger.want(peerId, a.cid)!.priority));
+      ..sort((a, b) => _ledger
+          .want(peerId, b.cid)!
+          .priority
+          .compareTo(_ledger.want(peerId, a.cid)!.priority));
 
     final presences = <pb.Message_BlockPresence>[];
     final blocks = <pb.Message_Block>[];
@@ -170,7 +175,8 @@ class BitswapServer {
     if (pendingBytes != null && pendingBytes > 0) {
       responses.last.pendingBytes = min(pendingBytes, _maxInt32);
     }
-    _log.fine('Sending response to $peerId (${blocks.length} blocks, ${presences.length} presences, '
+    _log.fine(
+        'Sending response to $peerId (${blocks.length} blocks, ${presences.length} presences, '
         '${pendingBytes ?? 'unknown'} bytes still pending) in ${responses.length} message(s)');
     for (final message in responses) {
       _network.sendMessage(peerId, message);
@@ -231,7 +237,9 @@ class BitswapServer {
 
     if (!hasBlock) {
       // The want stays in the ledger so blockAvailable can serve it later
-      if (want.sendDontHave) presences.add(_presence(cid, pb.Message_BlockPresenceType.DontHave));
+      if (want.sendDontHave) {
+        presences.add(_presence(cid, pb.Message_BlockPresenceType.DontHave));
+      }
       return 0;
     }
 
@@ -264,7 +272,9 @@ class BitswapServer {
   Future<Uint8List?> _blockIfTiny(_Reply reply) async {
     if (_wantHaveReplaceSize <= 0) return null;
     final known = reply.data;
-    if (known != null) return known.length <= _wantHaveReplaceSize ? known : null;
+    if (known != null) {
+      return known.length <= _wantHaveReplaceSize ? known : null;
+    }
 
     final store = _blockStore;
     if (store is SizedBlockStore) {
@@ -275,7 +285,8 @@ class BitswapServer {
     return data != null && data.length <= _wantHaveReplaceSize ? data : null;
   }
 
-  static pb.Message_BlockPresence _presence(dart_cid.CID cid, pb.Message_BlockPresenceType type) =>
+  static pb.Message_BlockPresence _presence(
+          dart_cid.CID cid, pb.Message_BlockPresenceType type) =>
       pb.Message_BlockPresence()
         ..cid = cid.toBytes()
         ..type = type;

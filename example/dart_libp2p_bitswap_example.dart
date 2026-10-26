@@ -20,13 +20,15 @@ class InMemoryBlockStore implements BlockStore {
   final Map<String, Uint8List> _blocks = {};
 
   @override
-  Future<bool> has(dart_cid.CID cid) async => _blocks.containsKey(cid.toString());
+  Future<bool> has(dart_cid.CID cid) async =>
+      _blocks.containsKey(cid.toString());
 
   @override
   Future<Uint8List?> get(dart_cid.CID cid) async => _blocks[cid.toString()];
 
   @override
-  Future<void> put(dart_cid.CID cid, Uint8List data) async => _blocks[cid.toString()] = data;
+  Future<void> put(dart_cid.CID cid, Uint8List data) async =>
+      _blocks[cid.toString()] = data;
 }
 
 /// A host listening on a random local UDP port, with Noise security and
@@ -38,7 +40,8 @@ Future<Host> createHost() async {
   final host = await p2p_config.Libp2p.new_([
     p2p_config.Libp2p.identity(keyPair),
     p2p_config.Libp2p.connManager(connManager),
-    p2p_config.Libp2p.transport(UDXTransport(connManager: connManager, udxInstance: UDX())),
+    p2p_config.Libp2p.transport(
+        UDXTransport(connManager: connManager, udxInstance: UDX())),
     p2p_config.Libp2p.security(await NoiseSecurity.create(keyPair)),
     p2p_config.Libp2p.listenAddrs([MultiAddr('/ip4/127.0.0.1/udp/0/udx')]),
     p2p_config.Libp2p.addrsFactory((addrs) => addrs),
@@ -65,8 +68,10 @@ Future<void> main() async {
   const options = BitswapOptions(rebroadcastInterval: Duration(seconds: 1));
 
   final providerStore = InMemoryBlockStore();
-  final providerBitswap = Bitswap(host: provider, blockStore: providerStore, options: options);
-  final fetcherBitswap = Bitswap(host: fetcher, blockStore: InMemoryBlockStore(), options: options);
+  final providerBitswap =
+      Bitswap(host: provider, blockStore: providerStore, options: options);
+  final fetcherBitswap = Bitswap(
+      host: fetcher, blockStore: InMemoryBlockStore(), options: options);
   await providerBitswap.start();
   await fetcherBitswap.start();
 
@@ -78,7 +83,8 @@ Future<void> main() async {
 
   // ...and the fetcher connects and asks for it
   await fetcher.connect(AddrInfo(provider.id, provider.addrs));
-  final received = await fetcherBitswap.getBlock(cid, timeout: const Duration(seconds: 15));
+  final received =
+      await fetcherBitswap.getBlock(cid, timeout: const Duration(seconds: 15));
 
   var ok = false;
   if (received == null) {

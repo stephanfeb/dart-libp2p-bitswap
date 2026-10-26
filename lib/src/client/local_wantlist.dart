@@ -21,8 +21,10 @@ class LocalWant {
   final int priority;
   pb.Message_Wantlist_WantType wantType; // Upgraded in place from Have to Block
   final bool sendDontHave;
-  final Map<libp2p.PeerId, PeerWantState> peers = {}; // Peers this want was sent to
-  final Completer<Uint8List> completer = Completer<Uint8List>(); // Completes when the block arrives
+  final Map<libp2p.PeerId, PeerWantState> peers =
+      {}; // Peers this want was sent to
+  final Completer<Uint8List> completer =
+      Completer<Uint8List>(); // Completes when the block arrives
   int waiters = 0; // getBlock callers currently awaiting [completer]
 
   LocalWant({
@@ -45,8 +47,9 @@ class LocalWant {
   }
 
   /// Peers that said HAVE but have not been sent WANT_BLOCK yet.
-  Iterable<libp2p.PeerId> get haveCandidates =>
-      peers.entries.where((e) => e.value.has == true && !e.value.sentBlock).map((e) => e.key);
+  Iterable<libp2p.PeerId> get haveCandidates => peers.entries
+      .where((e) => e.value.has == true && !e.value.sentBlock)
+      .map((e) => e.key);
 
   @override
   String toString() {
@@ -61,7 +64,8 @@ class LocalWantlist {
 
   /// Adds [cid] to the wantlist. Returns the want if it is new or was
   /// upgraded (and so needs broadcasting), or null if nothing changed.
-  LocalWant? add(CID cid, {
+  LocalWant? add(
+    CID cid, {
     int priority = 1,
     pb.Message_Wantlist_WantType wantType = pb.Message_Wantlist_WantType.Block,
     bool sendDontHave = false,
@@ -95,7 +99,8 @@ class LocalWantlist {
   Future<Uint8List> addWaiter(CID cid) {
     final entry = _wants[cid.toString()];
     if (entry == null) {
-      return Future.error(StateError('Block $cid is not in the local wantlist.'));
+      return Future.error(
+          StateError('Block $cid is not in the local wantlist.'));
     }
     entry.waiters++;
     return entry.completer.future;
@@ -130,7 +135,8 @@ class LocalWantlist {
 
   void _fail(LocalWant entry, Object error) {
     if (entry.completer.isCompleted) return;
-    entry.completer.future.ignore(); // Wants with no waiters must not surface as unhandled
+    entry.completer.future
+        .ignore(); // Wants with no waiters must not surface as unhandled
     entry.completer.completeError(error);
   }
 
@@ -145,7 +151,8 @@ class LocalWantlist {
 
   /// Records a HAVE ([has] true) or DONT_HAVE from [peerId] and returns the
   /// want, or null if [cid] is not wanted.
-  LocalWant? recordPresence(CID cid, libp2p.PeerId peerId, {required bool has}) {
+  LocalWant? recordPresence(CID cid, libp2p.PeerId peerId,
+      {required bool has}) {
     final want = _wants[cid.toString()];
     if (want == null) return null;
     want.peers.putIfAbsent(peerId, PeerWantState.new).has = has;

@@ -28,57 +28,87 @@ void main() {
     }
 
     test('accepts the prefix go-bitswap sends for CIDv0', () {
-      final cid = cidFromPrefixAndData(Uint8List.fromList([0x00, 0x70, 0x12, 0x20]), data);
+      final cid = cidFromPrefixAndData(
+          Uint8List.fromList([0x00, 0x70, 0x12, 0x20]), data);
       expect(cid.version, dart_cid.CID.V0);
       expect(cid.toString(), startsWith('Qm'));
     });
 
     test('rejects CIDv0 prefix with non dag-pb codec', () {
-      expect(() => cidFromPrefixAndData(Uint8List.fromList([0x00, 0x55, 0x12, 0x20]), data),
+      expect(
+          () => cidFromPrefixAndData(
+              Uint8List.fromList([0x00, 0x55, 0x12, 0x20]), data),
           throwsFormatException);
     });
 
     test('rejects truncated prefix', () {
-      expect(() => cidFromPrefixAndData(Uint8List.fromList([0x01, 0x55, 0x12]), data),
+      expect(
+          () => cidFromPrefixAndData(
+              Uint8List.fromList([0x01, 0x55, 0x12]), data),
           throwsFormatException);
     });
 
     test('rejects trailing bytes', () {
-      expect(() => cidFromPrefixAndData(Uint8List.fromList([0x01, 0x55, 0x12, 0x20, 0x00]), data),
+      expect(
+          () => cidFromPrefixAndData(
+              Uint8List.fromList([0x01, 0x55, 0x12, 0x20, 0x00]), data),
           throwsFormatException);
     });
 
     test('rejects digest length mismatch', () {
-      expect(() => cidFromPrefixAndData(Uint8List.fromList([0x01, 0x55, 0x12, 0x10]), data),
+      expect(
+          () => cidFromPrefixAndData(
+              Uint8List.fromList([0x01, 0x55, 0x12, 0x10]), data),
           throwsFormatException);
     });
 
     test('rejects unknown CID version', () {
-      expect(() => cidFromPrefixAndData(Uint8List.fromList([0x02, 0x55, 0x12, 0x20]), data),
+      expect(
+          () => cidFromPrefixAndData(
+              Uint8List.fromList([0x02, 0x55, 0x12, 0x20]), data),
           throwsFormatException);
     });
 
     test('rejects unsupported hash function', () {
       // 0xd5 = md5, deliberately not accepted
-      expect(() => cidFromPrefixAndData(Uint8List.fromList([0x01, 0x55, 0xd5, 0x01, 0x10]), data),
+      expect(
+          () => cidFromPrefixAndData(
+              Uint8List.fromList([0x01, 0x55, 0xd5, 0x01, 0x10]), data),
           throwsFormatException);
     });
   });
 
   group('multihash functions', () {
     final bytes = Uint8List.fromList(List.generate(200, (i) => i));
-    Uint8List hex(String s) =>
-        Uint8List.fromList([for (var i = 0; i < s.length; i += 2) int.parse(s.substring(i, i + 2), radix: 16)]);
+    Uint8List hex(String s) => Uint8List.fromList([
+          for (var i = 0; i < s.length; i += 2)
+            int.parse(s.substring(i, i + 2), radix: 16)
+        ]);
 
     // Digests of bytes 0..199, from Python's hashlib (an independent implementation)
     final vectors = {
-      (0x13, 'sha2-512'): '986058e9895e2c2ab8f9e8cbdf801db12a44842a56a91d5a4e87b1fc98b293722c4664142e42c3c551ff898646268cd92b84ed230b8c94bed7798d4f27cd7465',
-      (0x17, 'sha3-224'): '8bcd90dbc5379549b5e78a1fbe24ae120d92caef17750461262b1e97',
-      (0x16, 'sha3-256'): '5f728f63bf5ee48c77f453c0490398fa645b8d4c4e56be9a41cfec344d6ca899',
-      (0x15, 'sha3-384'): 'b13febb1b3c54a7c6b69367f693a1d1f3145709b6ddef23ff15874133ea1fb9cfa48ee7ff4ec9aa987dea641e33ccdf7',
-      (0x14, 'sha3-512'): 'ea5d05f19348dd589793354793a15f37a73b4c0bb4e750b9a00757dfce2f8b65a64191bb9b137de00feef6474cfd47abf7880efbc51614a5715df12cfe0caee3',
-      (0xb220, 'blake2b-256'): '63c3d97a9f8894d5e043a707b0fee7f7ec4c049a23bbf1079df20b4165f9e22d',
-      (0xb240, 'blake2b-512'): 'fb3c1f0f56a56f8e316fdf5d853c8c872c39635d083634c3904fc3ac07d1b578e85ff0e480e92d44ade33b62e893ee32343e79ddf6ef292e89b582d312502314',
+      (
+        0x13,
+        'sha2-512'
+      ): '986058e9895e2c2ab8f9e8cbdf801db12a44842a56a91d5a4e87b1fc98b293722c4664142e42c3c551ff898646268cd92b84ed230b8c94bed7798d4f27cd7465',
+      (0x17, 'sha3-224'):
+          '8bcd90dbc5379549b5e78a1fbe24ae120d92caef17750461262b1e97',
+      (0x16, 'sha3-256'):
+          '5f728f63bf5ee48c77f453c0490398fa645b8d4c4e56be9a41cfec344d6ca899',
+      (
+        0x15,
+        'sha3-384'
+      ): 'b13febb1b3c54a7c6b69367f693a1d1f3145709b6ddef23ff15874133ea1fb9cfa48ee7ff4ec9aa987dea641e33ccdf7',
+      (
+        0x14,
+        'sha3-512'
+      ): 'ea5d05f19348dd589793354793a15f37a73b4c0bb4e750b9a00757dfce2f8b65a64191bb9b137de00feef6474cfd47abf7880efbc51614a5715df12cfe0caee3',
+      (0xb220, 'blake2b-256'):
+          '63c3d97a9f8894d5e043a707b0fee7f7ec4c049a23bbf1079df20b4165f9e22d',
+      (
+        0xb240,
+        'blake2b-512'
+      ): 'fb3c1f0f56a56f8e316fdf5d853c8c872c39635d083634c3904fc3ac07d1b578e85ff0e480e92d44ade33b62e893ee32343e79ddf6ef292e89b582d312502314',
     };
 
     Uint8List prefixFor(int mhCode, int digestLength) => Uint8List.fromList([
@@ -95,7 +125,8 @@ void main() {
       return mh.sublist(code.value + length.value);
     }
 
-    for (final MapEntry(key: (code, name), value: expected) in vectors.entries) {
+    for (final MapEntry(key: (code, name), value: expected)
+        in vectors.entries) {
       test('$name verifies and round-trips its prefix', () {
         final prefix = prefixFor(code, expected.length ~/ 2);
         final cid = cidFromPrefixAndData(prefix, bytes);
@@ -109,7 +140,9 @@ void main() {
       final prefix = prefixFor(0x1b, 32);
       expect(digestOf(cidFromPrefixAndData(prefix, Uint8List(0))),
           hex('c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470'));
-      expect(digestOf(cidFromPrefixAndData(prefix, Uint8List.fromList('abc'.codeUnits))),
+      expect(
+          digestOf(cidFromPrefixAndData(
+              prefix, Uint8List.fromList('abc'.codeUnits))),
           hex('4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45'));
     });
 
@@ -117,50 +150,75 @@ void main() {
       // Official vectors from github.com/BLAKE3-team/BLAKE3 (test_vectors/).
       // Each input is input_len bytes of 0, 1, ..., 250, 0, 1, ...; each hash
       // is an extended output whose prefixes are the shorter digests.
-      final cases = (jsonDecode(File('test/fixtures/blake3_test_vectors.json').readAsStringSync())['cases'] as List)
+      final cases = (jsonDecode(File('test/fixtures/blake3_test_vectors.json')
+              .readAsStringSync())['cases'] as List)
           .cast<Map<String, dynamic>>();
-      Uint8List input(int length) => Uint8List.fromList(List.generate(length, (i) => i % 251));
+      Uint8List input(int length) =>
+          Uint8List.fromList(List.generate(length, (i) => i % 251));
 
       test('matches all ${cases.length} official vectors (32-byte digest)', () {
         final prefix = prefixFor(0x1e, 32);
         for (final c in cases) {
           final length = c['input_len'] as int;
           final cid = cidFromPrefixAndData(prefix, input(length));
-          expect(digestOf(cid), hex((c['hash'] as String).substring(0, 64)), reason: 'input_len $length');
+          expect(digestOf(cid), hex((c['hash'] as String).substring(0, 64)),
+              reason: 'input_len $length');
           expect(encodeCidPrefix(cid), prefix);
         }
       });
 
       test('honours declared digest lengths up to $maxBlake3DigestLength', () {
-        final c = cases.firstWhere((c) => c['input_len'] == 1025); // Spans two chunks
+        final c =
+            cases.firstWhere((c) => c['input_len'] == 1025); // Spans two chunks
         final extended = c['hash'] as String;
         for (final length in [16, 64, maxBlake3DigestLength]) {
-          final cid = cidFromPrefixAndData(prefixFor(0x1e, length), input(1025));
-          expect(digestOf(cid), hex(extended.substring(0, length * 2)), reason: '$length-byte digest');
+          final cid =
+              cidFromPrefixAndData(prefixFor(0x1e, length), input(1025));
+          expect(digestOf(cid), hex(extended.substring(0, length * 2)),
+              reason: '$length-byte digest');
         }
       });
 
       test('rejects digest lengths of 0 or over $maxBlake3DigestLength', () {
-        expect(() => cidFromPrefixAndData(prefixFor(0x1e, 0), bytes), throwsFormatException);
-        expect(() => cidFromPrefixAndData(prefixFor(0x1e, maxBlake3DigestLength + 1), bytes), throwsFormatException);
+        expect(() => cidFromPrefixAndData(prefixFor(0x1e, 0), bytes),
+            throwsFormatException);
+        expect(
+            () => cidFromPrefixAndData(
+                prefixFor(0x1e, maxBlake3DigestLength + 1), bytes),
+            throwsFormatException);
       });
     });
 
-    test('identity carries the block itself, up to $maxIdentityDigestLength bytes', () {
+    test(
+        'identity carries the block itself, up to $maxIdentityDigestLength bytes',
+        () {
       final small = Uint8List.fromList([1, 2, 3, 4]);
       expect(digestOf(cidFromPrefixAndData(prefixFor(0x00, 4), small)), small);
 
       final big = Uint8List(maxIdentityDigestLength + 1);
-      expect(() => cidFromPrefixAndData(prefixFor(0x00, big.length), big), throwsFormatException);
+      expect(() => cidFromPrefixAndData(prefixFor(0x00, big.length), big),
+          throwsFormatException);
     });
 
     test('a digest length that does not match the function is rejected', () {
-      expect(() => cidFromPrefixAndData(prefixFor(0xb220, 64), bytes), throwsFormatException);
-      expect(() => cidFromPrefixAndData(prefixFor(0x00, 3), Uint8List.fromList([1, 2, 3, 4])), throwsFormatException);
+      expect(() => cidFromPrefixAndData(prefixFor(0xb220, 64), bytes),
+          throwsFormatException);
+      expect(
+          () => cidFromPrefixAndData(
+              prefixFor(0x00, 3), Uint8List.fromList([1, 2, 3, 4])),
+          throwsFormatException);
     });
 
     test('supportedMultihashes lists them all', () {
-      expect(supportedMultihashes, containsAll(['identity', 'sha2-256', 'keccak-512', 'blake3', ...vectors.keys.map((k) => k.$2)]));
+      expect(
+          supportedMultihashes,
+          containsAll([
+            'identity',
+            'sha2-256',
+            'keccak-512',
+            'blake3',
+            ...vectors.keys.map((k) => k.$2)
+          ]));
     });
   });
 }

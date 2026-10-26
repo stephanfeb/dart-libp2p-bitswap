@@ -18,7 +18,8 @@ class FakeSwarm {
   final host = MockHost();
   final network = MockNetwork();
   final peerStore = MockPeerstore();
-  final events = StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
+  final events =
+      StreamController<libp2p.EvtPeerConnectednessChanged>.broadcast();
   final List<libp2p.PeerId> connected = [];
   final Set<libp2p.PeerId> speaksBitswap = {};
   final Map<libp2p.PeerId, List<pb.Message>> sent = {};
@@ -41,7 +42,8 @@ class FakeSwarm {
     when(peerStore.getPeer(any)).thenAnswer((inv) async {
       final peer = inv.positionalArguments[0] as libp2p.PeerId;
       final info = MockPeerInfo();
-      when(info.protocols).thenReturn(speaksBitswap.contains(peer) ? {bitswapProtocolId} : <String>{});
+      when(info.protocols).thenReturn(
+          speaksBitswap.contains(peer) ? {bitswapProtocolId} : <String>{});
       return info;
     });
     when(host.newStream(any, any, any)).thenAnswer((inv) async {
@@ -73,15 +75,19 @@ class FakeSwarm {
   }
 
   /// Wantlist entries sent to [peer] for [cid], oldest first.
-  List<pb.Message_Wantlist_Entry> entriesTo(libp2p.PeerId peer, dart_cid.CID cid) => [
+  List<pb.Message_Wantlist_Entry> entriesTo(
+          libp2p.PeerId peer, dart_cid.CID cid) =>
+      [
         for (final m in sent[peer] ?? const <pb.Message>[])
           for (final e in m.wantlist.entries)
             if (_sameBytes(e.block, cid.toBytes())) e,
       ];
 
   bool sentWantBlock(libp2p.PeerId peer, dart_cid.CID cid) =>
-      entriesTo(peer, cid).any((e) => !e.cancel && e.wantType == pb.Message_Wantlist_WantType.Block);
+      entriesTo(peer, cid).any(
+          (e) => !e.cancel && e.wantType == pb.Message_Wantlist_WantType.Block);
 
   static bool _sameBytes(List<int> a, List<int> b) =>
-      a.length == b.length && Iterable<int>.generate(a.length).every((i) => a[i] == b[i]);
+      a.length == b.length &&
+      Iterable<int>.generate(a.length).every((i) => a[i] == b[i]);
 }

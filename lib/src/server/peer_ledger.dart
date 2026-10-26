@@ -35,14 +35,18 @@ class PeerLedger {
 
   /// Adds or replaces [peerId]'s want for [cid]. Returns false, recording
   /// nothing, if [cid] is new and [peerId] already has [maxWantsPerPeer].
-  bool addWant(libp2p.PeerId peerId, CID cid, {
+  bool addWant(
+    libp2p.PeerId peerId,
+    CID cid, {
     int priority = 1,
     pb.Message_Wantlist_WantType wantType = pb.Message_Wantlist_WantType.Block,
     bool sendDontHave = false,
   }) {
     final peerWants = _wants.putIfAbsent(peerId, () => {});
     final key = cid.toString();
-    if (peerWants.length >= maxWantsPerPeer && !peerWants.containsKey(key)) return false;
+    if (peerWants.length >= maxWantsPerPeer && !peerWants.containsKey(key)) {
+      return false;
+    }
     peerWants[key] = PeerWant(
       cid: cid,
       priority: priority,
@@ -53,7 +57,8 @@ class PeerLedger {
   }
 
   /// [peerId]'s current want for [cid], if any.
-  PeerWant? want(libp2p.PeerId peerId, CID cid) => _wants[peerId]?[cid.toString()];
+  PeerWant? want(libp2p.PeerId peerId, CID cid) =>
+      _wants[peerId]?[cid.toString()];
 
   /// Removes [peerId]'s want for [cid] (cancelled, or fulfilled by us).
   PeerWant? removeWant(libp2p.PeerId peerId, CID cid) {
@@ -73,7 +78,8 @@ class PeerLedger {
     };
   }
 
-  Map<String, PeerWant> wantsFor(libp2p.PeerId peerId) => Map.unmodifiable(_wants[peerId] ?? const {});
+  Map<String, PeerWant> wantsFor(libp2p.PeerId peerId) =>
+      Map.unmodifiable(_wants[peerId] ?? const {});
 
   /// Forgets everything [peerId] wants (disconnect, or a full wantlist).
   void clearPeer(libp2p.PeerId peerId) => _wants.remove(peerId);
