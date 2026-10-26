@@ -1,0 +1,21 @@
+# A .pubignore replaces .gitignore for `dart pub publish`, so repeat those
+# entries here as well as excluding repo-only files.
+
+# From .gitignore
+.dart_tool/
+pubspec.lock
+.idea
+*.iml
+.dolt/
+*.db
+.beads-credential-key
+.beads/
+*.gate.lock*
+
+# Agent and project-management files
+AGENTS.md
+CLAUDE.md
+implementation_progress.md
+
+# Copy of the upstream spec (ipfs/specs); linked from the README instead
+bitswap_spec.txt

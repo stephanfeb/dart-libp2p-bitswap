@@ -1,7 +1,14 @@
 name: dart_libp2p_bitswap
 description: An implementation of the Bitswap 1.2.0 block exchange protocol for dart_libp2p.
 version: 2.0.0
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/stephanfeb/dart-libp2p-bitswap
+issue_tracker: https://github.com/stephanfeb/dart-libp2p-bitswap/issues
+topics:
+  - libp2p
+  - ipfs
+  - bitswap
+  - p2p
+  - networking
 
 environment:
   sdk: ^3.5.0
@@ -10,7 +17,7 @@ dependencies:
   blake3_dart: ^1.0.0
   convert: ^3.1.2
   crypto: ^3.0.3
-  dart_libp2p: ^1.0.0
+  dart_libp2p: ^4.12.0
   dart_multihash: ^1.0.1
   dcid: ^1.0.0
   logging: ^1.2.0
@@ -19,7 +26,7 @@ dependencies:
   protobuf: ^3.1.0
 
 dev_dependencies:
-  dart_udx: ^2.0.1 # Transport for the example
+  dart_udx: ^4.3.0 # Transport for the example
   mockito: ^5.4.4
   analyzer: ^6.0.0  # Use a version compatible with mockito 5.4.5
   build_runner: ^2.4.13

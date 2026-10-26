@@ -1,54 +1,43 @@
 # Dart Libp2p Bitswap
 
-[![Pub Version](https://img.shields.io/pub/v/dart_libp2p_bitswap)](https://pub.dev/packages/dart_libp2p_bitswap) <!-- Replace with actual badge if published -->
-[![Dart CI](https://github.com/your_org/dart-libp2p-bitswap/actions/workflows/dart.yml/badge.svg)](https://github.com/your_org/dart-libp2p-bitswap/actions/workflows/dart.yml) <!-- Replace with your CI badge -->
+[![Pub Version](https://img.shields.io/pub/v/dart_libp2p_bitswap)](https://pub.dev/packages/dart_libp2p_bitswap)
 
-A Dart implementation of the [Bitswap protocol](https://github.com/ipfs/specs/blob/master/bitswap/README.md) for the [libp2p](https://libp2p.io/) networking stack. This package enables Dart applications to exchange content-addressed blocks of data with other peers in the libp2p network using Bitswap.
+A Dart implementation of the [Bitswap protocol](https://github.com/ipfs/specs/blob/main/src/bitswap-protocol.md) for [dart_libp2p](https://pub.dev/packages/dart_libp2p). It lets Dart applications exchange content-addressed blocks with other libp2p peers. Protocol behaviour (want strategy, limits, defaults) follows [boxo](https://github.com/ipfs/boxo), the Go implementation used by kubo; interoperability with Go nodes has not yet been tested.
 
-This implementation targets **Bitswap Protocol Version 1.2.0**.
+This implementation targets **Bitswap 1.2.0** (`/ipfs/bitswap/1.2.0`).
 
 ## Features
 
-*   Implements Bitswap version 1.2.0 (`/ipfs/bitswap/1.2.0`).
-*   Requesting blocks from peers using wantlists.
-*   Responding to peer requests with blocks from a local block store.
-*   Sending and receiving `HAVE` / `DONT_HAVE` messages for blocks.
-*   Sending `CANCEL` messages for blocks no longer needed.
-*   Management of local and per-peer wantlists.
-*   Automatic handling of varint-prefixed message framing.
-*   Reuse of outgoing streams for efficient communication.
-*   Basic peer disconnection handling to clean up resources.
+*   **Fetching:** `getBlock` / `wantBlocks` with the 1.2.0 strategy — `WANT_BLOCK` to one peer, `WANT_HAVE` to the rest, with `DONT_HAVE` and disconnects moving the request to a peer that has the block. Wants are rebroadcast periodically and cancelled with every peer asked once a block arrives.
+*   **Serving:** answers peers' wantlists from your `BlockStore`, pushes blocks to peers waiting for them as they arrive, and sends tiny blocks directly in reply to `WANT_HAVE`.
+*   **Bounded and fair:** per-peer wantlist limits, round-robin serving by priority, 4 MiB message limits in both directions, and serving kept off the network read path.
+*   **Verification:** every received block is re-hashed against its CID; unsolicited blocks are discarded. Supports CIDv0/v1 with sha2, sha3, keccak, blake2b, blake3 and identity multihashes.
+*   **Lifecycle:** explicit `start()` / `stop()`, logging via `package:logging`, no side effects at construction.
 
 ## Getting Started
 
-### Prerequisites
+### Requirements
 
-*   A working Dart environment.
-*   An initialized and running `dart_libp2p` `Host` instance. This package relies on an existing libp2p host for network communication, peer discovery, and stream management.
-*   Familiarity with CIDs (Content Identifiers) and block-based data storage.
+*   Dart SDK 3.5 or later.
+*   [`dart_libp2p`](https://pub.dev/packages/dart_libp2p) 4.12 or later (within 4.x), with a started `Host`. Bitswap uses the host for streams, its event bus for peer connect/disconnect events, and its peer store to find peers that speak Bitswap.
+*   [`dcid`](https://pub.dev/packages/dcid) for CIDs.
 
 ### Installation
 
-If this package is published to pub.dev, add it to your `pubspec.yaml`:
+```sh
+dart pub add dart_libp2p_bitswap
+```
+
+or add it to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
   dart_libp2p_bitswap: ^2.0.0
-  dart_libp2p: ^1.0.0
-  dcid: ^1.0.0     # For CID objects
-  # other necessary dependencies
+  dart_libp2p: ^4.12.0
+  dcid: ^1.0.0
 ```
 
-If you are using it as a local path dependency:
-
-```yaml
-dependencies:
-  dart_libp2p_bitswap:
-    path: ../path/to/dart_libp2p_bitswap # Adjust path as needed
-  # ... other dependencies
-```
-
-Then run `dart pub get` or `flutter pub get`.
+Upgrading from 1.x? See the [changelog](CHANGELOG.md) for the breaking changes in 2.0.0.
 
 ## Usage
 
@@ -178,16 +167,15 @@ This library implements version **1.2.0** of the Bitswap protocol, identified by
 *   CIDv0 and CIDv1 blocks via `prefix` and `data` in block payloads. Received blocks are re-hashed and verified with: sha2-256/512, sha3-224/256/384/512, keccak-256/512, blake2b-256/512, blake3 (digests of 1–128 bytes), and identity (up to 128 bytes). Blocks using other hash functions are rejected.
 *   4 MiB message size limit, matching go-bitswap / boxo.
 
-For full specification details, please refer to the [official Bitswap spec](https://github.com/ipfs/specs/blob/master/bitswap/README.md).
+For full specification details, please refer to the [official Bitswap spec](https://github.com/ipfs/specs/blob/main/src/bitswap-protocol.md).
 You can also find a copy of the spec used during development in `bitswap_spec.txt` within this repository.
 
 ## Additional Information
 
-### Contributing
-Contributions are welcome! Please feel free to open an issue or submit a pull request on the [GitHub repository](https://github.com/your_org/dart-libp2p-bitswap). <!-- Replace with actual repo URL -->
+### Contributing and issues
 
-### Filing Issues
-If you encounter any bugs or have feature requests, please file an issue on the [GitHub issue tracker](https://github.com/your_org/dart-libp2p-bitswap/issues). <!-- Replace with actual repo URL -->
+Contributions are welcome. Please open an issue or pull request on [GitHub](https://github.com/stephanfeb/dart-libp2p-bitswap); bugs and feature requests go to the [issue tracker](https://github.com/stephanfeb/dart-libp2p-bitswap/issues).
 
 ### License
-This package is licensed under the [Your License] license. <!-- TODO: Specify License, e.g., MIT, Apache-2.0 -->
+
+MIT; see [LICENSE](LICENSE).

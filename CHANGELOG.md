@@ -2,6 +2,7 @@
 
 Breaking changes:
 
+- Requires `dart_libp2p` ^4.12.0 (was ^1.0.0).
 - `IBlockStore` is renamed to `BlockStore`.
 - `Bitswap` no longer takes `peerEventsStream`; it subscribes to `host.eventBus` itself.
 - Construction has no side effects. Call `await bitswap.start()` before use; `wantBlocks`/`getBlock` throw `StateError` if not started or after `stop()`.
