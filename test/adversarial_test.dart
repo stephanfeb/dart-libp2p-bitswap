@@ -139,6 +139,17 @@ void main() {
       expect(await pending, blockData);
     });
 
+    test('a BLAKE3 block completes getBlock', () async {
+      final prefix = [0x01, 0x55, 0x1e, 0x20]; // raw, blake3, 32 bytes
+      final blake3Cid = cidFromPrefixAndData(Uint8List.fromList(prefix), blockData);
+      final pending = bitswap.getBlock(blake3Cid, timeout: const Duration(hours: 1));
+      await pumpEventQueue();
+
+      await bitswap.handleIncomingMessage(peerA, blockMsg(prefix, blockData));
+
+      expect(await pending, blockData);
+    });
+
     test('the same block delivered twice is stored once', () async {
       final pending = bitswap.getBlock(cid, timeout: const Duration(hours: 1));
       await pumpEventQueue();

@@ -173,7 +173,7 @@ This library implements version **1.2.0** of the Bitswap protocol, identified by
 *   `Block` and `Have` want types.
 *   `sendDontHave` requests.
 *   `HAVE` / `DONT_HAVE` block presence messages.
-*   CIDv0 and CIDv1 blocks via `prefix` and `data` in block payloads. Received blocks are re-hashed and verified with: sha2-256/512, sha3-224/256/384/512, keccak-256/512, blake2b-256/512, and identity (up to 128 bytes). Blocks using other hash functions are rejected.
+*   CIDv0 and CIDv1 blocks via `prefix` and `data` in block payloads. Received blocks are re-hashed and verified with: sha2-256/512, sha3-224/256/384/512, keccak-256/512, blake2b-256/512, blake3 (digests of 1–128 bytes), and identity (up to 128 bytes). Blocks using other hash functions are rejected.
 *   4 MiB message size limit, matching go-bitswap / boxo.
 
 For full specification details, please refer to the [official Bitswap spec](https://github.com/ipfs/specs/blob/master/bitswap/README.md).

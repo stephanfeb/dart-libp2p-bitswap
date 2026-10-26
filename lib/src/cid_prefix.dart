@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:blake3_dart/blake3_dart.dart' as blake3;
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:dart_multihash/dart_multihash.dart' as dart_multihash;
 import 'package:dcid/dcid.dart' as dart_cid;
@@ -11,21 +12,28 @@ import 'package:pointycastle/digests/sha3.dart';
 /// verifcid: identity CIDs are meant for tiny inline blocks.
 const maxIdentityDigestLength = 128;
 
-typedef _Hasher = ({String name, Uint8List Function(Uint8List data) hash});
+/// Largest BLAKE3 digest accepted, as in go-multihash. BLAKE3 can produce
+/// any output length, so its multihash digest length is variable.
+const maxBlake3DigestLength = 128;
+
+// [hash] gets the digest length the prefix declares; only variable-length
+// functions (BLAKE3) use it, the rest are checked against it afterwards
+typedef _Hasher = ({String name, Uint8List Function(Uint8List data, int digestLength) hash});
 
 // Hash functions we can verify received blocks with, by multihash code
 final Map<int, _Hasher> _hashers = {
-  0x00: (name: 'identity', hash: (data) => data),
-  0x12: (name: 'sha2-256', hash: (data) => Uint8List.fromList(crypto.sha256.convert(data).bytes)),
-  0x13: (name: 'sha2-512', hash: (data) => Uint8List.fromList(crypto.sha512.convert(data).bytes)),
-  0x14: (name: 'sha3-512', hash: (data) => SHA3Digest(512).process(data)),
-  0x15: (name: 'sha3-384', hash: (data) => SHA3Digest(384).process(data)),
-  0x16: (name: 'sha3-256', hash: (data) => SHA3Digest(256).process(data)),
-  0x17: (name: 'sha3-224', hash: (data) => SHA3Digest(224).process(data)),
-  0x1b: (name: 'keccak-256', hash: (data) => KeccakDigest(256).process(data)),
-  0x1d: (name: 'keccak-512', hash: (data) => KeccakDigest(512).process(data)),
-  0xb220: (name: 'blake2b-256', hash: (data) => Blake2bDigest(digestSize: 32).process(data)),
-  0xb240: (name: 'blake2b-512', hash: (data) => Blake2bDigest(digestSize: 64).process(data)),
+  0x00: (name: 'identity', hash: (data, _) => data),
+  0x12: (name: 'sha2-256', hash: (data, _) => Uint8List.fromList(crypto.sha256.convert(data).bytes)),
+  0x13: (name: 'sha2-512', hash: (data, _) => Uint8List.fromList(crypto.sha512.convert(data).bytes)),
+  0x14: (name: 'sha3-512', hash: (data, _) => SHA3Digest(512).process(data)),
+  0x15: (name: 'sha3-384', hash: (data, _) => SHA3Digest(384).process(data)),
+  0x16: (name: 'sha3-256', hash: (data, _) => SHA3Digest(256).process(data)),
+  0x17: (name: 'sha3-224', hash: (data, _) => SHA3Digest(224).process(data)),
+  0x1b: (name: 'keccak-256', hash: (data, _) => KeccakDigest(256).process(data)),
+  0x1d: (name: 'keccak-512', hash: (data, _) => KeccakDigest(512).process(data)),
+  0x1e: (name: 'blake3', hash: blake3.blake3),
+  0xb220: (name: 'blake2b-256', hash: (data, _) => Blake2bDigest(digestSize: 32).process(data)),
+  0xb240: (name: 'blake2b-512', hash: (data, _) => Blake2bDigest(digestSize: 64).process(data)),
 };
 
 /// Names of the multihash functions [cidFromPrefixAndData] can verify.
@@ -89,7 +97,10 @@ dart_cid.CID cidFromPrefixAndData(Uint8List prefix, Uint8List data) {
   if (hasher.name == 'identity' && data.length > maxIdentityDigestLength) {
     throw FormatException('Identity block of ${data.length} bytes exceeds $maxIdentityDigestLength');
   }
-  final digest = hasher.hash(data);
+  if (hasher.name == 'blake3' && (digestLength < 1 || digestLength > maxBlake3DigestLength)) {
+    throw FormatException('BLAKE3 digest length $digestLength outside 1..$maxBlake3DigestLength');
+  }
+  final digest = hasher.hash(data, digestLength);
   if (digest.length != digestLength) {
     throw FormatException(
         'Digest length $digestLength in prefix does not match ${hasher.name} (${digest.length})');

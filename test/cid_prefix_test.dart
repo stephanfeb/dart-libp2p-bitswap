@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p_bitswap/src/cid_prefix.dart';
@@ -111,6 +113,39 @@ void main() {
           hex('4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45'));
     });
 
+    group('blake3', () {
+      // Official vectors from github.com/BLAKE3-team/BLAKE3 (test_vectors/).
+      // Each input is input_len bytes of 0, 1, ..., 250, 0, 1, ...; each hash
+      // is an extended output whose prefixes are the shorter digests.
+      final cases = (jsonDecode(File('test/fixtures/blake3_test_vectors.json').readAsStringSync())['cases'] as List)
+          .cast<Map<String, dynamic>>();
+      Uint8List input(int length) => Uint8List.fromList(List.generate(length, (i) => i % 251));
+
+      test('matches all ${cases.length} official vectors (32-byte digest)', () {
+        final prefix = prefixFor(0x1e, 32);
+        for (final c in cases) {
+          final length = c['input_len'] as int;
+          final cid = cidFromPrefixAndData(prefix, input(length));
+          expect(digestOf(cid), hex((c['hash'] as String).substring(0, 64)), reason: 'input_len $length');
+          expect(encodeCidPrefix(cid), prefix);
+        }
+      });
+
+      test('honours declared digest lengths up to $maxBlake3DigestLength', () {
+        final c = cases.firstWhere((c) => c['input_len'] == 1025); // Spans two chunks
+        final extended = c['hash'] as String;
+        for (final length in [16, 64, maxBlake3DigestLength]) {
+          final cid = cidFromPrefixAndData(prefixFor(0x1e, length), input(1025));
+          expect(digestOf(cid), hex(extended.substring(0, length * 2)), reason: '$length-byte digest');
+        }
+      });
+
+      test('rejects digest lengths of 0 or over $maxBlake3DigestLength', () {
+        expect(() => cidFromPrefixAndData(prefixFor(0x1e, 0), bytes), throwsFormatException);
+        expect(() => cidFromPrefixAndData(prefixFor(0x1e, maxBlake3DigestLength + 1), bytes), throwsFormatException);
+      });
+    });
+
     test('identity carries the block itself, up to $maxIdentityDigestLength bytes', () {
       final small = Uint8List.fromList([1, 2, 3, 4]);
       expect(digestOf(cidFromPrefixAndData(prefixFor(0x00, 4), small)), small);
@@ -125,7 +160,7 @@ void main() {
     });
 
     test('supportedMultihashes lists them all', () {
-      expect(supportedMultihashes, containsAll(['identity', 'sha2-256', 'keccak-512', ...vectors.keys.map((k) => k.$2)]));
+      expect(supportedMultihashes, containsAll(['identity', 'sha2-256', 'keccak-512', 'blake3', ...vectors.keys.map((k) => k.$2)]));
     });
   });
 }

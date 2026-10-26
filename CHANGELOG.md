@@ -13,7 +13,7 @@ Breaking changes:
 New:
 
 - `BitswapOptions` (`getBlockTimeout`, `rebroadcastInterval`), `Bitswap.cancelWants`.
-- Blocks hashed with sha3-224/256/384/512, keccak-256/512, blake2b-256/512 or identity (up to 128 bytes) are verified and accepted, in addition to sha2-256/512.
+- Blocks hashed with sha3-224/256/384/512, keccak-256/512, blake2b-256/512, blake3 (1–128-byte digests) or identity (up to 128 bytes) are verified and accepted, in addition to sha2-256/512.
 - A runnable two-node example (`example/dart_libp2p_bitswap_example.dart`).
 - `Bitswap.notifyNewBlock` for blocks the application stores itself: serves peers waiting for it and completes local wants.
 - Bitswap 1.2.0 want strategy: `WANT_BLOCK` to one peer and `WANT_HAVE` to the rest, with `sendDontHave`; on `DONT_HAVE` or disconnect, `WANT_BLOCK` moves to a peer that said `HAVE`.
