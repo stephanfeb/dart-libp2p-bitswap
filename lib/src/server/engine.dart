@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:dart_libp2p/dart_libp2p.dart' as libp2p;
@@ -15,6 +16,8 @@ import './peer_ledger.dart';
 
 final _log = Logger('bitswap.server');
 
+const _maxInt32 = 0x7fffffff; // pendingBytes is an int32 on the wire
+
 /// The serving half of Bitswap: answers peers' wantlists from the
 /// [BlockStore] and pushes blocks to peers waiting for them.
 ///
@@ -26,6 +29,7 @@ class BitswapServer {
   final BlockStore _blockStore;
   final BitswapNetworkService _network;
   final int _serveBytesPerTurn;
+  final int _wantHaveReplaceSize;
   final PeerLedger _ledger;
 
   // Per peer: wants awaiting a reply, by CID string
@@ -37,6 +41,7 @@ class BitswapServer {
 
   BitswapServer(this._blockStore, this._network, BitswapOptions options)
       : _serveBytesPerTurn = options.serveBytesPerTurn,
+        _wantHaveReplaceSize = options.wantHaveReplaceSize,
         _ledger = PeerLedger(maxWantsPerPeer: options.maxWantsPerPeer);
 
   /// Records [peerId]'s wants and cancels, and queues replies to the wants.
@@ -83,8 +88,8 @@ class BitswapServer {
   }
 
   /// Push-on-store: queues [cid] for every peer waiting for it. Peers that
-  /// sent WANT_HAVE get a HAVE presence; peers that sent WANT_BLOCK get the
-  /// block.
+  /// sent WANT_BLOCK get the block; peers that sent WANT_HAVE get a HAVE, or
+  /// the block itself if it is tiny.
   void blockAvailable(dart_cid.CID cid, Uint8List data) {
     if (_stopped) return;
     for (final peerId in _ledger.peersWanting(cid).keys) {
@@ -159,13 +164,56 @@ class BitswapServer {
     }
 
     final responses = packResponse(presences, blocks);
-    if (responses.isNotEmpty) {
-      _log.fine('Sending response to $peerId (${blocks.length} blocks, ${presences.length} presences) in ${responses.length} message(s)');
+    if (responses.isEmpty) return;
+    final pendingBytes = await _pendingBytes(peerId);
+    if (_stopped) return;
+    if (pendingBytes != null && pendingBytes > 0) {
+      responses.last.pendingBytes = min(pendingBytes, _maxInt32);
     }
+    _log.fine('Sending response to $peerId (${blocks.length} blocks, ${presences.length} presences, '
+        '${pendingBytes ?? 'unknown'} bytes still pending) in ${responses.length} message(s)');
     for (final message in responses) {
       _network.sendMessage(peerId, message);
     }
   }
+
+  /// Bytes of replies still queued for [peerId], counted as boxo does: a
+  /// block's size if it will be sent, else the size of its presence. Null
+  /// if unknown, which is the case for a plain [BlockStore] (sizing would
+  /// mean reading every queued block).
+  Future<int?> _pendingBytes(libp2p.PeerId peerId) async {
+    final pending = _pending[peerId];
+    if (pending == null || pending.isEmpty) return 0;
+    final store = _blockStore;
+    var total = 0;
+    for (final reply in pending.values.toList()) {
+      final want = _ledger.want(peerId, reply.cid);
+      if (want == null) continue;
+      if (!reply.sized) {
+        if (reply.data != null) {
+          reply.size = reply.data!.length;
+        } else if (store is SizedBlockStore) {
+          reply.size = await store.getSize(reply.cid);
+        } else {
+          return null;
+        }
+        reply.sized = true;
+      }
+      final blockSize = reply.size;
+      if (blockSize == null) {
+        if (want.sendDontHave) total += _presenceSize(reply.cid);
+      } else if (want.wantType == pb.Message_Wantlist_WantType.Block ||
+          (_wantHaveReplaceSize > 0 && blockSize <= _wantHaveReplaceSize)) {
+        total += blockSize;
+      } else {
+        total += _presenceSize(reply.cid);
+      }
+    }
+    return total;
+  }
+
+  static int _presenceSize(dart_cid.CID cid) =>
+      _presence(cid, pb.Message_BlockPresenceType.Have).writeToBuffer().length;
 
   /// Adds [reply] to [peerId]'s want to the response and returns the block
   /// bytes added. The ledger is re-read after each blockstore call, so a want
@@ -187,14 +235,22 @@ class BitswapServer {
       return 0;
     }
 
+    final Uint8List? blockData;
     if (want.wantType == pb.Message_Wantlist_WantType.Have) {
-      presences.add(_presence(cid, pb.Message_BlockPresenceType.Have));
-      _ledger.removeWant(peerId, cid);
-      return 0;
+      // A tiny block is cheaper to send than a HAVE and the WANT_BLOCK it prompts
+      final tiny = await _blockIfTiny(reply);
+      if (_ledger.want(peerId, cid) == null) return 0;
+      if (tiny == null) {
+        presences.add(_presence(cid, pb.Message_BlockPresenceType.Have));
+        _ledger.removeWant(peerId, cid);
+        return 0;
+      }
+      blockData = tiny;
+    } else {
+      blockData = reply.data ?? await _blockStore.get(cid);
+      if (blockData == null || _ledger.want(peerId, cid) == null) return 0;
     }
 
-    final blockData = reply.data ?? await _blockStore.get(cid);
-    if (blockData == null || _ledger.want(peerId, cid) == null) return 0;
     blocks.add(pb.Message_Block()
       ..prefix = encodeCidPrefix(cid)
       ..data = blockData);
@@ -202,7 +258,24 @@ class BitswapServer {
     return blockData.length;
   }
 
-  pb.Message_BlockPresence _presence(dart_cid.CID cid, pb.Message_BlockPresenceType type) =>
+  /// [reply]'s block if it is at most [_wantHaveReplaceSize] bytes, else
+  /// null. Uses [SizedBlockStore.getSize] when available to avoid reading
+  /// large blocks just to find out they are large.
+  Future<Uint8List?> _blockIfTiny(_Reply reply) async {
+    if (_wantHaveReplaceSize <= 0) return null;
+    final known = reply.data;
+    if (known != null) return known.length <= _wantHaveReplaceSize ? known : null;
+
+    final store = _blockStore;
+    if (store is SizedBlockStore) {
+      final size = await store.getSize(reply.cid);
+      if (size == null || size > _wantHaveReplaceSize) return null;
+    }
+    final data = await store.get(reply.cid);
+    return data != null && data.length <= _wantHaveReplaceSize ? data : null;
+  }
+
+  static pb.Message_BlockPresence _presence(dart_cid.CID cid, pb.Message_BlockPresenceType type) =>
       pb.Message_BlockPresence()
         ..cid = cid.toBytes()
         ..type = type;
@@ -214,5 +287,9 @@ class _Reply {
   final dart_cid.CID cid;
   final Uint8List? data;
 
-  const _Reply(this.cid, this.data);
+  // Block size (null: not stored), once [sized]; cached for pendingBytes
+  bool sized = false;
+  int? size;
+
+  _Reply(this.cid, this.data);
 }

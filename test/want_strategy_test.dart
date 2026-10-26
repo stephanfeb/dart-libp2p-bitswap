@@ -186,6 +186,25 @@ void main() {
     });
 
     test('sends HAVE to a peer that sent WANT_HAVE', () async {
+      final big = Uint8List.fromList(List.filled(2000, 1)); // Over wantHaveReplaceSize
+      final bigCid = dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', big);
+      swarm.addBitswapPeer(peerA);
+      await bitswap.handleIncomingMessage(peerA, pb.Message()
+        ..wantlist = (pb.Message_Wantlist()
+          ..entries.add(pb.Message_Wantlist_Entry()
+            ..block = bigCid.toBytes()
+            ..wantType = pb.Message_Wantlist_WantType.Have
+            ..sendDontHave = true)));
+
+      bitswap.notifyNewBlock(bigCid, big);
+      await pumpEventQueue();
+
+      final last = swarm.sent[peerA]!.last;
+      expect(last.payload, isEmpty);
+      expect(last.blockPresences.single.type, pb.Message_BlockPresenceType.Have);
+    });
+
+    test('sends a tiny block itself to a peer that sent WANT_HAVE', () async {
       swarm.addBitswapPeer(peerA);
       await bitswap.handleIncomingMessage(peerA, wantFrom(pb.Message_Wantlist_WantType.Have));
 
@@ -193,8 +212,8 @@ void main() {
       await pumpEventQueue();
 
       final last = swarm.sent[peerA]!.last;
-      expect(last.payload, isEmpty);
-      expect(last.blockPresences.single.type, pb.Message_BlockPresenceType.Have);
+      expect(last.blockPresences, isEmpty);
+      expect(last.payload.single.data, blockData);
     });
 
     test('completes our own pending getBlock and CANCELs the peers asked', () async {

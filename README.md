@@ -77,6 +77,8 @@ class MyBlockStore implements BlockStore {
 }
 ```
 
+If your store can report a block's size without reading it, implement `SizedBlockStore` (adds `Future<int?> getSize(CID)`) instead. Bitswap then avoids reading large blocks when deciding how to answer a `WANT_HAVE` (see below), and can tell peers how many bytes it still has queued for them (`pendingBytes`, as boxo does).
+
 ### 2. Create and start Bitswap
 
 Construct `Bitswap` with your libp2p `Host` and block store, then call `start()`. Construction has no side effects; `start()` registers the `/ipfs/bitswap/1.2.0` protocol handler and subscribes to the host's event bus for peer connect/disconnect events.
@@ -115,7 +117,7 @@ Wants follow the Bitswap 1.2.0 pattern: each block is requested with `WANT_BLOCK
 
 ### 4. Providing Blocks
 
-When peers request blocks present in your `BlockStore` (checked via `has` and `get`), Bitswap sends them automatically, split into messages of at most 4 MiB. Peers that send `WANT_HAVE` receive a `HAVE` presence rather than the block.
+When peers request blocks present in your `BlockStore` (checked via `has` and `get`), Bitswap sends them automatically, split into messages of at most 4 MiB. Peers that send `WANT_HAVE` receive a `HAVE` presence rather than the block, unless the block is at most `BitswapOptions.wantHaveReplaceSize` bytes (default 1024, as in boxo; 0 disables): then it is cheaper to send the block itself.
 
 Serving runs off the network read path. Peers take turns, each served up to `BitswapOptions.serveBytesPerTurn` (default 1 MiB) of blocks per turn, highest-priority wants first. Each peer may have at most `BitswapOptions.maxWantsPerPeer` (default 1024) outstanding wants; entries beyond that are ignored. A want cancelled while its block is being read is not sent.
 
@@ -161,7 +163,7 @@ It also shows a minimal in-memory `BlockStore`. Note that dart_libp2p's default 
 
 *   **`Bitswap`**: The main public class for interacting with the Bitswap service.
 *   **`BlockStore`**: An interface you must implement to provide block storage capabilities to the Bitswap service.
-*   **`BitswapOptions`**: Tunables: the default `getBlock` timeout, the wantlist rebroadcast interval, and serving limits (`maxWantsPerPeer`, `serveBytesPerTurn`).
+*   **`BitswapOptions`**: Tunables: the default `getBlock` timeout, the wantlist rebroadcast interval, and serving limits (`maxWantsPerPeer`, `serveBytesPerTurn`) and `wantHaveReplaceSize`.
 *   **`BitswapClient`** (`lib/src/client/`): (Internal) Fetching — our `LocalWantlist`, broadcasting wants, accepting blocks and presences.
 *   **`BitswapServer`** (`lib/src/server/`): (Internal) Serving — the per-peer `PeerLedger`, answering wantlists, size-limited response packing.
 *   **`BitswapNetworkService`** (`lib/src/network/`): (Internal) Stream handling, varint framing, and the ordered per-peer send queue.

@@ -415,7 +415,8 @@ void main() {
   });
 
   group('WANT_HAVE handling', () {
-    final blockData = Uint8List.fromList([4, 4, 4]);
+    // Over BitswapOptions.wantHaveReplaceSize, so WANT_HAVE gets a HAVE
+    final blockData = Uint8List.fromList(List.filled(2000, 4));
     final cid = dart_cid.CID.fromData(dart_cid.CID.V1, 'raw', blockData);
     late MockP2PStream peerStream;
 
